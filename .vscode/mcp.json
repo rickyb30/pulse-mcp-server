@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "pulse": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "${workspaceFolder}/advanced_mcp_server.py"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "PYTHONPATH": "${workspaceFolder}",
+        "PATH": "${workspaceFolder}/venv/bin:${env:PATH}"
+      }
+    }
+  }
+} 

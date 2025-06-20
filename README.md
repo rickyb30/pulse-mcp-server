@@ -93,6 +93,14 @@ python run_http_server.py
 3. Restart Claude Desktop
 4. Look for the tools icon (🔨)
 
+### Option 3: VSCode Integration
+1. **Built-in MCP Support**: Enable `chat.mcp.enabled` in VSCode settings
+2. Open the project in VSCode (`.vscode/mcp.json` is pre-configured)
+3. Use Chat view (Ctrl+Alt+I) in Agent mode
+4. **Alternative**: Install **Cline** extension for additional MCP features
+
+📖 **[Complete VSCode Setup Guide](VSCODE_SETUP.md)**
+
 ## 🏦 AWS Cost Analysis
 
 ### Available AWS Tools
@@ -209,6 +217,15 @@ Ensure your AWS credentials have the following permissions:
 
 ```
 pulse-mcp-server/
+├── .gitignore                  # Git ignore rules
+├── .vscode/                    # VSCode configuration
+│   ├── mcp.json                # Official VSCode MCP config
+│   ├── settings.json           # Workspace settings
+│   ├── launch.json             # Debug configurations
+│   └── extensions.json         # Recommended extensions
+├── LICENSE                     # MIT license
+├── README.md                   # Comprehensive documentation
+├── VSCODE_SETUP.md             # VSCode integration guide
 ├── advanced_mcp_server.py      # Main MCP server with all tools
 ├── aws_cost_analyzer.py        # AWS cost analysis engine
 ├── stock_market_analyzer.py    # Stock market analysis engine
@@ -216,9 +233,7 @@ pulse-mcp-server/
 ├── run_http_server.py          # Flexible server runner
 ├── claude_config.json          # Claude Desktop configuration
 ├── requirements.txt            # Python dependencies
-├── setup_env.py               # Environment setup utility
-├── .gitignore                  # Git ignore rules
-└── README.md                   # This file
+└── setup_env.py               # Environment setup utility
 ```
 
 ## 🔍 Troubleshooting
