@@ -11,10 +11,15 @@ import asyncio
 import json
 import sys
 import re
+import os
 from typing import Dict, List, Any, Optional
 from fastmcp import Client
 from datetime import datetime
 import argparse
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 class MCPAgent:
     def __init__(self):
@@ -26,6 +31,77 @@ class MCPAgent:
         self.snowflake_session = None
         self.aws_session = None
         self.session_expiry = None
+        self.openai_client = None
+        self.last_detailed_results = None
+        self._init_llm()
+    
+    def _init_llm(self):
+        """Initialize LLM client for generating user-friendly responses"""
+        try:
+            openai_api_key = os.getenv("OPENAI_API_KEY")
+            if openai_api_key:
+                from openai import OpenAI
+                self.openai_client = OpenAI(api_key=openai_api_key)
+                print("🧠 LLM integration enabled for enhanced responses")
+            else:
+                print("💡 Add OPENAI_API_KEY to your .env file for enhanced AI responses")
+        except ImportError:
+            print("💡 Install openai package for enhanced AI responses: pip install openai")
+        except Exception as e:
+            print(f"⚠️  LLM initialization warning: {e}")
+    
+    async def generate_friendly_summary(self, question: str, tool_results: List[Dict[str, Any]]) -> str:
+        """Generate a user-friendly summary of tool results using LLM"""
+        if not self.openai_client:
+            return None
+        
+        try:
+            # Prepare context for the LLM
+            context = {
+                "user_question": question,
+                "tool_results": tool_results,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Create a prompt for the LLM
+            prompt = f"""
+You are an intelligent assistant helping a user analyze their data. The user asked: "{question}"
+
+Here are the results from various tools:
+{json.dumps(tool_results, indent=2)}
+
+Please provide a friendly, conversational summary that:
+1. Directly answers the user's question
+2. Highlights key insights from the data
+3. Uses natural language (avoid technical jargon)
+4. Mentions specific numbers, costs, or metrics when available
+5. Provides actionable insights or recommendations when appropriate
+6. Keep it concise but informative (2-4 sentences)
+
+Do not include the raw JSON data in your response - just provide a natural language summary.
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful data analyst assistant. Provide clear, concise, and actionable insights from data analysis results. Focus on what matters most to the user."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=300,
+                temperature=0.7
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            print(f"⚠️  LLM summary generation failed: {e}")
+            return None
         
     async def connect(self):
         """Connect to the MCP server"""
@@ -624,25 +700,38 @@ class MCPAgent:
                     'result': result
                 })
         
-        # Format response
-        response = self.format_response(question, results)
+        # Store detailed results for potential later access
+        self.last_detailed_results = results
+        
+        # Generate LLM summary first
+        llm_summary = await self.generate_friendly_summary(question, results)
+        
+        # Format response with both summary and details
+        response = await self.format_response(question, results, llm_summary)
         
         # Add response to conversation history
         self.conversation_history.append({
             'timestamp': datetime.now().isoformat(),
             'type': 'response',
             'content': response,
-            'tools_used': [r['tool'] for r in results]
+            'tools_used': [r['tool'] for r in results],
+            'has_llm_summary': llm_summary is not None
         })
         
         return response
     
-    def format_response(self, question: str, results: List[Dict[str, Any]]) -> str:
+    async def format_response(self, question: str, results: List[Dict[str, Any]], llm_summary: str = None) -> str:
         """Format the response based on tool results"""
         if not results:
             return "❌ No results were obtained from the tools."
         
         response_parts = []
+        
+        # Add LLM summary at the top if available
+        if llm_summary:
+            response_parts.append("🤖 **AI Analysis:**")
+            response_parts.append(f"   {llm_summary}\n")
+            response_parts.append("📊 **Detailed Results:**")
         
         for result in results:
             tool_name = result['tool']
@@ -665,6 +754,10 @@ class MCPAgent:
                         response_parts.append(f"   📊 {json.dumps(tool_result, indent=2)}")
             else:
                 response_parts.append(f"   📊 {tool_result}")
+        
+        # Add a note about detailed data availability
+        if llm_summary:
+            response_parts.append(f"\n💡 *Ask 'show details' for complete raw data*")
         
         return "\n".join(response_parts)
     
@@ -730,6 +823,7 @@ class MCPAgent:
 • `tools` - List all available tools
 • `history` - Show conversation history
 • `session` - Show current session status
+• `details` - Show detailed JSON from last query
 • `clear` - Clear stored sessions
 • `quit` - Exit the agent
 """
@@ -796,6 +890,20 @@ class MCPAgent:
         status_text += "\n\n💡 Use `clear` to clear all sessions"
         return status_text
     
+    def show_detailed_results(self):
+        """Show detailed JSON results from the last query"""
+        if not self.last_detailed_results:
+            return "📝 No previous results to show. Ask a question first!"
+        
+        details_text = "\n📊 **Detailed JSON Results:**\n"
+        for result in self.last_detailed_results:
+            tool_name = result['tool']
+            tool_result = result['result']
+            details_text += f"\n🔧 **{tool_name}**:\n"
+            details_text += f"```json\n{json.dumps(tool_result, indent=2)}\n```\n"
+        
+        return details_text
+    
     async def run_interactive(self):
         """Run the agent in interactive mode"""
         print("\n" + "="*60)
@@ -827,6 +935,8 @@ class MCPAgent:
                 elif user_input.lower() in ['clear', 'clear session']:
                     self.clear_snowflake_session()
                     print("✅ Session cleared successfully")
+                elif user_input.lower() in ['details', 'show details', 'raw']:
+                    print(self.show_detailed_results())
                 else:
                     print("\n🤖 Agent: Processing your question...")
                     response = await self.handle_question(user_input)
