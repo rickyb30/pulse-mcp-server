@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""
+Environment Setup Script
+------------------------
+Interactive script to set up environment variables for the MCP server.
+"""
+import os
+from pathlib import Path
+
+def setup_environment():
+    """Interactive setup for environment variables"""
+    print("🔧 MCP Server Environment Setup")
+    print("=" * 40)
+    print("This script will help you configure environment variables for:")
+    print("- OpenWeather API")
+    print("- OpenAI API") 
+    print("- AWS Configuration")
+    print("- Snowflake Configuration")
+    print()
+    
+    env_vars = {}
+    
+    # OpenWeather API
+    print("🌤️ OpenWeather API Configuration")
+    print("-" * 30)
+    openweather_key = input("Enter OpenWeather API key (or press Enter to skip): ").strip()
+    if openweather_key:
+        env_vars["OPENWEATHER_API_KEY"] = openweather_key
+        print("✅ OpenWeather API key configured")
+    else:
+        print("⚠️ Skipping OpenWeather API - weather tool will use mock data")
+    print()
+    
+    # OpenAI API
+    print("🤖 OpenAI API Configuration")
+    print("-" * 30)
+    openai_key = input("Enter OpenAI API key (or press Enter to skip): ").strip()
+    if openai_key:
+        env_vars["OPENAI_API_KEY"] = openai_key
+        print("✅ OpenAI API key configured")
+    else:
+        print("⚠️ Skipping OpenAI API - web search will use basic fallback")
+    print()
+    
+    # AWS Configuration
+    print("🏦 AWS Configuration")
+    print("-" * 30)
+    print("AWS credentials are typically configured via 'aws configure' command")
+    print("or through ~/.aws/credentials and ~/.aws/config files")
+    aws_profile = input("Enter default AWS profile name (or press Enter for 'default'): ").strip()
+    if aws_profile:
+        env_vars["AWS_PROFILE"] = aws_profile
+        print(f"✅ AWS profile set to: {aws_profile}")
+    print()
+    
+    # Snowflake Configuration
+    print("❄️ Snowflake Configuration")
+    print("-" * 30)
+    print("Choose authentication method:")
+    print("1. SSO/External Browser (Recommended)")
+    print("2. Username/Password")
+    print("3. Skip configuration")
+    
+    choice = input("Enter choice (1-3): ").strip()
+    
+    if choice == "1":
+        sf_account = input("Enter Snowflake account identifier (e.g., xyz123.us-east-1): ").strip()
+        sf_user = input("Enter Snowflake username: ").strip()
+        
+        if sf_account and sf_user:
+            env_vars["SNOWFLAKE_ACCOUNT"] = sf_account
+            env_vars["SNOWFLAKE_USER"] = sf_user
+            env_vars["SNOWFLAKE_AUTHENTICATOR"] = "externalbrowser"
+            print("✅ Snowflake SSO configuration saved")
+        
+    elif choice == "2":
+        sf_account = input("Enter Snowflake account identifier: ").strip()
+        sf_user = input("Enter Snowflake username: ").strip()
+        sf_password = input("Enter Snowflake password: ").strip()
+        sf_role = input("Enter Snowflake role (optional): ").strip()
+        sf_warehouse = input("Enter default warehouse (optional): ").strip()
+        
+        if sf_account and sf_user and sf_password:
+            env_vars["SNOWFLAKE_ACCOUNT"] = sf_account
+            env_vars["SNOWFLAKE_USER"] = sf_user
+            env_vars["SNOWFLAKE_PASSWORD"] = sf_password
+            if sf_role:
+                env_vars["SNOWFLAKE_ROLE"] = sf_role
+            if sf_warehouse:
+                env_vars["SNOWFLAKE_WAREHOUSE"] = sf_warehouse
+            print("✅ Snowflake credentials configuration saved")
+            print("⚠️ Note: Password is stored in .env file. Keep it secure!")
+    else:
+        print("⚠️ Skipping Snowflake configuration")
+    print()
+    
+    # Server Configuration
+    print("🚀 Server Configuration")
+    print("-" * 30)
+    transport = input("Enter MCP transport (stdio/http) [default: stdio]: ").strip()
+    if transport:
+        env_vars["MCP_TRANSPORT"] = transport
+    
+    if transport == "http":
+        host = input("Enter server host [default: localhost]: ").strip()
+        port = input("Enter server port [default: 8000]: ").strip()
+        if host:
+            env_vars["MCP_HOST"] = host
+        if port:
+            env_vars["MCP_PORT"] = port
+    print()
+    
+    # Write .env file
+    env_file = Path(".env")
+    
+    if env_vars:
+        print("💾 Writing configuration to .env file...")
+        
+        # Read existing .env if it exists
+        existing_vars = {}
+        if env_file.exists():
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        existing_vars[key] = value
+        
+        # Merge with new vars
+        existing_vars.update(env_vars)
+        
+        # Write updated .env file
+        with open(env_file, 'w') as f:
+            f.write("# MCP Server Environment Configuration\n")
+            f.write("# Generated by setup_env.py\n\n")
+            
+            if "OPENWEATHER_API_KEY" in existing_vars:
+                f.write("# OpenWeather API\n")
+                f.write(f"OPENWEATHER_API_KEY={existing_vars['OPENWEATHER_API_KEY']}\n\n")
+            
+            if "OPENAI_API_KEY" in existing_vars:
+                f.write("# OpenAI API\n")
+                f.write(f"OPENAI_API_KEY={existing_vars['OPENAI_API_KEY']}\n\n")
+            
+            if "AWS_PROFILE" in existing_vars:
+                f.write("# AWS Configuration\n")
+                f.write(f"AWS_PROFILE={existing_vars['AWS_PROFILE']}\n\n")
+            
+            # Snowflake configuration
+            snowflake_vars = [k for k in existing_vars.keys() if k.startswith('SNOWFLAKE_')]
+            if snowflake_vars:
+                f.write("# Snowflake Configuration\n")
+                for var in snowflake_vars:
+                    f.write(f"{var}={existing_vars[var]}\n")
+                f.write("\n")
+            
+            # Server configuration
+            server_vars = [k for k in existing_vars.keys() if k.startswith('MCP_')]
+            if server_vars:
+                f.write("# Server Configuration\n")
+                for var in server_vars:
+                    f.write(f"{var}={existing_vars[var]}\n")
+        
+        print(f"✅ Configuration saved to {env_file}")
+        print(f"📁 File location: {env_file.absolute()}")
+    else:
+        print("⚠️ No configuration to save")
+    
+    print()
+    print("🎉 Setup complete!")
+    print()
+    print("📋 Next steps:")
+    print("1. Review your .env file")
+    print("2. Start the MCP server: python run_http_server.py")
+    print("3. Configure Claude Desktop with the provided config")
+    print()
+    print("🔒 Security notes:")
+    print("- Keep your .env file secure and don't commit it to version control")
+    print("- For Snowflake SSO, no passwords are stored - authentication happens via browser")
+    print("- AWS credentials should be configured via 'aws configure' command")
+
+if __name__ == "__main__":
+    setup_environment() 
