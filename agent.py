@@ -23,6 +23,9 @@ class MCPAgent:
         self.resources = {}
         self.prompts = {}
         self.conversation_history = []
+        self.snowflake_session = None
+        self.aws_session = None
+        self.session_expiry = None
         
     async def connect(self):
         """Connect to the MCP server"""
@@ -187,6 +190,20 @@ class MCPAgent:
                 
             print(f"🔧 Executing tool: {tool_name} with params: {params}")
             result = await self.client.call_tool(tool_name, params)
+            
+            # Handle TextContent wrapped results from MCP server
+            if hasattr(result, '__iter__') and not isinstance(result, (str, dict)):
+                # If result is a list/iterable of TextContent objects
+                for item in result:
+                    if hasattr(item, 'text'):
+                        try:
+                            # Try to parse the text as JSON
+                            parsed = json.loads(item.text)
+                            return parsed
+                        except json.JSONDecodeError:
+                            # If not JSON, return the text directly
+                            return item.text
+            
             return result
             
         except Exception as e:
@@ -287,15 +304,39 @@ class MCPAgent:
         
         return None
     
+    def is_session_valid(self) -> bool:
+        """Check if current Snowflake session is still valid"""
+        if not self.snowflake_session:
+            return False
+        
+        # Check if session has expiry information
+        if self.session_expiry:
+            from datetime import datetime
+            try:
+                expiry_time = datetime.fromisoformat(self.session_expiry)
+                if datetime.now() > expiry_time:
+                    print("⏰ Session expired, need to re-authenticate")
+                    return False
+            except:
+                pass
+        
+        return True
+    
     async def ensure_snowflake_connection(self, original_question: str) -> Dict[str, Any]:
         """Ensure Snowflake is connected, ask for details if needed"""
         try:
+            # Check if we have a valid existing session
+            if self.is_session_valid():
+                print("✅ Using existing Snowflake session")
+                return self.snowflake_session
+            
             # First try auto-connect
             print("🔍 Checking Snowflake connection...")
             auto_result = await self.execute_tool('connect_snowflake_auto', {})
             
             if isinstance(auto_result, dict) and auto_result.get('success'):
                 print("✅ Auto-connected to Snowflake successfully!")
+                self.store_snowflake_session(auto_result)
                 return auto_result
             
             # Detect user's preferred connection method from their question
@@ -303,10 +344,16 @@ class MCPAgent:
             
             if preferred_method == 'sso':
                 print("🔐 Detected SSO preference in your question. Setting up SSO connection...")
-                return await self.setup_snowflake_sso()
+                result = await self.setup_snowflake_sso()
+                if result.get('success'):
+                    self.store_snowflake_session(result)
+                return result
             elif preferred_method == 'credentials':
                 print("🔑 Detected credential preference in your question. Setting up credential connection...")
-                return await self.setup_snowflake_credentials()
+                result = await self.setup_snowflake_credentials()
+                if result.get('success'):
+                    self.store_snowflake_session(result)
+                return result
             else:
                 # If no preference detected, ask user for connection details
                 print("\n❗ Snowflake connection required.")
@@ -319,9 +366,15 @@ class MCPAgent:
                     choice = input("\n🤔 Choose connection method (1/2/3): ").strip()
                     
                     if choice == '1':
-                        return await self.setup_snowflake_sso()
+                        result = await self.setup_snowflake_sso()
+                        if result.get('success'):
+                            self.store_snowflake_session(result)
+                        return result
                     elif choice == '2':
-                        return await self.setup_snowflake_credentials()
+                        result = await self.setup_snowflake_credentials()
+                        if result.get('success'):
+                            self.store_snowflake_session(result)
+                        return result
                     elif choice == '3':
                         print("⚠️  Skipping Snowflake connection. Results may be limited.")
                         return {'success': True, 'method': 'skipped'}
@@ -362,6 +415,28 @@ class MCPAgent:
         # myorg-myaccount
         return account_input
     
+    def store_snowflake_session(self, connection_result: Dict[str, Any]):
+        """Store Snowflake session information for reuse"""
+        if connection_result.get('success'):
+            self.snowflake_session = connection_result
+            
+            # Set session expiry (default to 4 hours if not provided)
+            if 'expires_at' in connection_result:
+                self.session_expiry = connection_result['expires_at']
+            else:
+                from datetime import datetime, timedelta
+                # Default session expiry of 4 hours
+                expiry = datetime.now() + timedelta(hours=4)
+                self.session_expiry = expiry.isoformat()
+            
+            print(f"💾 Session stored and will expire at {self.session_expiry[:19]}")
+    
+    def clear_snowflake_session(self):
+        """Clear stored Snowflake session"""
+        self.snowflake_session = None
+        self.session_expiry = None
+        print("🧹 Snowflake session cleared")
+    
     async def setup_snowflake_sso(self) -> Dict[str, Any]:
         """Setup Snowflake SSO connection"""
         try:
@@ -395,13 +470,30 @@ class MCPAgent:
             if isinstance(result, dict):
                 if result.get('success'):
                     print("✅ SSO connection successful!")
+                    if result.get('message'):
+                        print(f"📝 {result['message']}")
                     return result
                 else:
                     error_msg = result.get('error', 'Unknown error')
                     print(f"❌ SSO connection failed: {error_msg}")
                     return result
+            elif isinstance(result, str):
+                # Try to parse string results as JSON
+                try:
+                    parsed_result = json.loads(result)
+                    if isinstance(parsed_result, dict) and parsed_result.get('success'):
+                        print("✅ SSO connection successful!")
+                        if parsed_result.get('message'):
+                            print(f"📝 {parsed_result['message']}")
+                        return parsed_result
+                    else:
+                        print(f"❌ Connection result: {result}")
+                        return {'success': False, 'error': result}
+                except json.JSONDecodeError:
+                    print(f"❌ Unexpected result: {result}")
+                    return {'success': False, 'error': str(result)}
             else:
-                print(f"❌ Unexpected result: {result}")
+                print(f"❌ Unexpected result type: {type(result)} - {result}")
                 return {'success': False, 'error': str(result)}
                 
         except Exception as e:
@@ -455,13 +547,30 @@ class MCPAgent:
             if isinstance(result, dict):
                 if result.get('success'):
                     print("✅ Credential connection successful!")
+                    if result.get('message'):
+                        print(f"📝 {result['message']}")
                     return result
                 else:
                     error_msg = result.get('error', 'Unknown error')
                     print(f"❌ Credential connection failed: {error_msg}")
                     return result
+            elif isinstance(result, str):
+                # Try to parse string results as JSON
+                try:
+                    parsed_result = json.loads(result)
+                    if isinstance(parsed_result, dict) and parsed_result.get('success'):
+                        print("✅ Credential connection successful!")
+                        if parsed_result.get('message'):
+                            print(f"📝 {parsed_result['message']}")
+                        return parsed_result
+                    else:
+                        print(f"❌ Connection result: {result}")
+                        return {'success': False, 'error': result}
+                except json.JSONDecodeError:
+                    print(f"❌ Unexpected result: {result}")
+                    return {'success': False, 'error': str(result)}
             else:
-                print(f"❌ Unexpected result: {result}")
+                print(f"❌ Unexpected result type: {type(result)} - {result}")
                 return {'success': False, 'error': str(result)}
                 
         except Exception as e:
@@ -487,6 +596,11 @@ class MCPAgent:
             connection_result = await self.ensure_snowflake_connection(question)
             if connection_result and 'error' in connection_result:
                 return f"❌ Snowflake connection failed: {connection_result['error']}"
+            
+            # If connection was successful, show connection status
+            if connection_result and connection_result.get('success'):
+                if connection_result.get('method') != 'skipped':
+                    print("🎯 Connection established! Proceeding with your request...")
         
         # Suggest and execute tools
         suggested_tools = self.suggest_tools(analysis)
@@ -615,6 +729,8 @@ class MCPAgent:
 • `help` - Show this help
 • `tools` - List all available tools
 • `history` - Show conversation history
+• `session` - Show current session status
+• `clear` - Clear stored sessions
 • `quit` - Exit the agent
 """
         return help_text
@@ -655,6 +771,31 @@ class MCPAgent:
         
         return history_text
     
+    def show_session_status(self):
+        """Show current session status"""
+        status_text = "\n🔐 **Session Status:**\n"
+        
+        # Snowflake session
+        if self.snowflake_session:
+            status_text += "\n✅ **Snowflake**: Connected"
+            if self.session_expiry:
+                status_text += f"\n   📅 Expires: {self.session_expiry[:19]}"
+            if self.snowflake_session.get('account'):
+                status_text += f"\n   🏢 Account: {self.snowflake_session['account']}"
+            if self.snowflake_session.get('user'):
+                status_text += f"\n   👤 User: {self.snowflake_session['user']}"
+        else:
+            status_text += "\n❌ **Snowflake**: Not connected"
+        
+        # AWS session (placeholder for future)
+        if self.aws_session:
+            status_text += "\n✅ **AWS**: Connected"
+        else:
+            status_text += "\n❌ **AWS**: Not connected"
+        
+        status_text += "\n\n💡 Use `clear` to clear all sessions"
+        return status_text
+    
     async def run_interactive(self):
         """Run the agent in interactive mode"""
         print("\n" + "="*60)
@@ -681,6 +822,11 @@ class MCPAgent:
                     print(self.show_tools())
                 elif user_input.lower() == 'history':
                     print(self.show_history())
+                elif user_input.lower() in ['session', 'status']:
+                    print(self.show_session_status())
+                elif user_input.lower() in ['clear', 'clear session']:
+                    self.clear_snowflake_session()
+                    print("✅ Session cleared successfully")
                 else:
                     print("\n🤖 Agent: Processing your question...")
                     response = await self.handle_question(user_input)
