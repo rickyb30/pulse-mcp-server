@@ -1,0 +1,232 @@
+name: AI-Powered PR Summary
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  generate-summary:
+    runs-on: ubuntu-latest
+    name: Generate PR Summary
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Get PR details
+      id: pr-details
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { data: pr } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+          
+          const { data: commits } = await github.rest.pulls.listCommits({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+          
+          const { data: files } = await github.rest.pulls.listFiles({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+          
+          return {
+            title: pr.title,
+            body: pr.body || '',
+            commits: commits.map(c => ({
+              message: c.commit.message,
+              sha: c.sha.substring(0, 7)
+            })),
+            files: files.map(f => ({
+              filename: f.filename,
+              status: f.status,
+              additions: f.additions,
+              deletions: f.deletions,
+              changes: f.changes,
+              patch: f.patch ? f.patch.substring(0, 1000) : '' // Limit patch size
+            }))
+          };
+          
+    - name: Generate AI Summary
+      id: ai-summary
+      uses: actions/github-script@v7
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      with:
+        script: |
+          const prData = ${{ steps.pr-details.outputs.result }};
+          
+          // Prepare the prompt for the AI
+          const prompt = `
+          Please analyze this pull request and generate a comprehensive summary:
+          
+          **PR Title:** ${prData.title}
+          **PR Description:** ${prData.body}
+          
+          **Commits:**
+          ${prData.commits.map(c => `- ${c.sha}: ${c.message}`).join('\n')}
+          
+          **Changed Files:**
+          ${prData.files.map(f => `- ${f.filename} (${f.status}) +${f.additions} -${f.deletions}`).join('\n')}
+          
+          **File Changes Preview:**
+          ${prData.files.slice(0, 3).map(f => `
+          ### ${f.filename}
+          \`\`\`diff
+          ${f.patch}
+          \`\`\`
+          `).join('\n')}
+          
+          Please provide:
+          1. **Summary**: A concise overview of what this PR accomplishes
+          2. **Key Changes**: List the main changes and their impact
+          3. **Technical Details**: Important implementation details
+          4. **Testing Considerations**: What should be tested
+          5. **Potential Impact**: Areas that might be affected
+          
+          Format the response in clear markdown with appropriate sections.
+          `;
+          
+          // Make API call to OpenAI
+          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content: 'You are a senior software engineer reviewing code changes. Provide clear, technical, and actionable insights about pull requests.'
+                },
+                {
+                  role: 'user',
+                  content: prompt
+                }
+              ],
+              max_tokens: 1500,
+              temperature: 0.3
+            })
+          });
+          
+          if (!response.ok) {
+            throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
+          }
+          
+          const data = await response.json();
+          const summary = data.choices[0].message.content;
+          
+          return summary;
+          
+    - name: Update PR with Summary
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const summary = ${{ steps.ai-summary.outputs.result }};
+          const prData = ${{ steps.pr-details.outputs.result }};
+          
+          // Check if there's already an AI summary comment
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          const aiComment = comments.find(comment => 
+            comment.body.includes('<!-- AI-GENERATED-SUMMARY -->') && 
+            comment.user.login === 'github-actions[bot]'
+          );
+          
+          const commentBody = `<!-- AI-GENERATED-SUMMARY -->
+          ## 🤖 AI-Generated PR Summary
+          
+          ${summary}
+          
+          ---
+          
+          ### 📊 PR Statistics
+          - **Files changed:** ${prData.files.length}
+          - **Total additions:** ${prData.files.reduce((sum, f) => sum + f.additions, 0)}
+          - **Total deletions:** ${prData.files.reduce((sum, f) => sum + f.deletions, 0)}
+          - **Commits:** ${prData.commits.length}
+          
+          ### 📝 Commit History
+          ${prData.commits.map(c => `- \`${c.sha}\`: ${c.message}`).join('\n')}
+          
+          *This summary was automatically generated by AI based on the code changes and commit messages.*
+          `;
+          
+          if (aiComment) {
+            // Update existing comment
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: aiComment.id,
+              body: commentBody
+            });
+          } else {
+            // Create new comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: commentBody
+            });
+          }
+          
+    - name: Add labels based on changes
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const prData = ${{ steps.pr-details.outputs.result }};
+          const labels = [];
+          
+          // Determine labels based on file changes
+          const fileTypes = prData.files.map(f => f.filename.split('.').pop().toLowerCase());
+          
+          if (fileTypes.includes('py')) labels.push('python');
+          if (fileTypes.includes('js') || fileTypes.includes('ts')) labels.push('javascript');
+          if (fileTypes.includes('yml') || fileTypes.includes('yaml')) labels.push('ci/cd');
+          if (fileTypes.includes('md')) labels.push('documentation');
+          if (fileTypes.includes('json')) labels.push('configuration');
+          
+          // Size labels based on changes
+          const totalChanges = prData.files.reduce((sum, f) => sum + f.changes, 0);
+          if (totalChanges > 500) labels.push('size/XL');
+          else if (totalChanges > 100) labels.push('size/L');
+          else if (totalChanges > 30) labels.push('size/M');
+          else labels.push('size/S');
+          
+          // MCP related changes
+          if (prData.files.some(f => f.filename.includes('mcp') || f.filename.includes('server'))) {
+            labels.push('mcp');
+          }
+          
+          // AWS related changes
+          if (prData.files.some(f => f.filename.includes('aws') || f.filename.includes('cost'))) {
+            labels.push('aws');
+          }
+          
+          // Add labels if any were determined
+          if (labels.length > 0) {
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: labels
+            });
+          } 
