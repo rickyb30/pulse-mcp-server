@@ -3,6 +3,9 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastMCP](https://img.shields.io/badge/FastMCP-2.0-green.svg)](https://github.com/jlowin/fastmcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Build Status](https://github.com/rickyb30/pulse-mcp-server/workflows/Build%20and%20Test/badge.svg)](https://github.com/rickyb30/pulse-mcp-server/actions/workflows/build.yml)
+[![Release](https://github.com/rickyb30/pulse-mcp-server/workflows/Release/badge.svg)](https://github.com/rickyb30/pulse-mcp-server/actions/workflows/release.yml)
+[![GitHub release](https://img.shields.io/github/release/rickyb30/pulse-mcp-server.svg)](https://github.com/rickyb30/pulse-mcp-server/releases/latest)
 
 A comprehensive Model Context Protocol (MCP) server built with FastMCP 2.0 that provides weather data, web search, calculations, **AWS cost analysis**, **stock market analysis**, and **Snowflake cost monitoring** capabilities.
 

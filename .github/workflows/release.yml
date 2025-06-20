@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Get tag name
+      id: tag
+      run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        if [ -n "$LAST_TAG" ]; then
+          COMMITS=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD)
+        else
+          COMMITS=$(git log --pretty=format:"- %s")
+        fi
+        
+        # Create changelog
+        cat << EOF > CHANGELOG.md
+        ## What's Changed
+        
+        $COMMITS
+        
+        ## MCP Server Features
+        
+        🔍 **AWS Cost Analysis**
+        - Multi-account cost monitoring
+        - Top 5 services by cost identification
+        - Detailed cost reporting with AWS Cost Explorer API
+        
+        📈 **Stock Market Analysis**
+        - Real-time stock prices and company fundamentals
+        - Technical indicators (RSI, MACD, moving averages)
+        - Portfolio tracking and cryptocurrency data
+        
+        ❄️ **Snowflake Cost Monitoring**
+        - SSO/external browser authentication
+        - Warehouse cost analysis and credit usage tracking
+        
+        🌤️ **Weather & Web Search**
+        - OpenWeather API integration with fallback
+        - DuckDuckGo web search capabilities
+        
+        ## Integration Support
+        
+        - ✅ Claude Desktop integration
+        - ✅ VSCode built-in MCP support
+        - ✅ Cline extension compatibility
+        
+        **Full Changelog**: https://github.com/${{ github.repository }}/compare/$LAST_TAG...${{ steps.tag.outputs.tag }}
+        EOF
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: Release ${{ steps.tag.outputs.tag }}
+        body_path: CHANGELOG.md
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create distribution package
+      run: |
+        # Create a distribution package
+        mkdir -p dist
+        cp -r *.py requirements.txt README.md LICENSE .vscode/ dist/
+        cd dist
+        tar -czf ../pulse-mcp-server-${{ steps.tag.outputs.tag }}.tar.gz .
+        cd ..
+        zip -r pulse-mcp-server-${{ steps.tag.outputs.tag }}.zip dist/
+
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.tag.outputs.tag }}
+        files: |
+          pulse-mcp-server-${{ steps.tag.outputs.tag }}.tar.gz
+          pulse-mcp-server-${{ steps.tag.outputs.tag }}.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
