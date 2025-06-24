@@ -7,7 +7,7 @@
 [![Release](https://github.com/rickyb30/pulse-mcp-server/workflows/Release/badge.svg)](https://github.com/rickyb30/pulse-mcp-server/actions/workflows/release.yml)
 [![GitHub release](https://img.shields.io/github/release/rickyb30/pulse-mcp-server.svg)](https://github.com/rickyb30/pulse-mcp-server/releases/latest)
 
-A comprehensive Model Context Protocol (MCP) server built with FastMCP 2.0 that provides weather data, web search, calculations, **AWS cost analysis**, **stock market analysis**, and **Snowflake cost monitoring** capabilities.
+A comprehensive Model Context Protocol (MCP) server built with FastMCP 2.0 that provides weather data, web search, calculations, **AWS cost analysis**, **stock market analysis**, **Snowflake cost monitoring**, and **Databricks cost analysis** capabilities.
 
 ## 🌟 Features
 
@@ -18,6 +18,7 @@ A comprehensive Model Context Protocol (MCP) server built with FastMCP 2.0 that 
 - **🏦 AWS Cost Analysis**: Multi-account AWS cost monitoring and optimization
 - **📈 Stock Market Analysis**: Real-time prices, technical indicators, portfolio tracking
 - **❄️ Snowflake Cost Monitoring**: Warehouse costs, credit usage, storage analysis
+- **🧱 Databricks Cost Analysis**: Cluster costs, workspace monitoring, SSO authentication
 
 ### AWS Cost Analysis Features
 - **📊 Profile Discovery**: Automatically discovers AWS profiles from `~/.aws/config` and `~/.aws/credentials`
@@ -40,6 +41,14 @@ A comprehensive Model Context Protocol (MCP) server built with FastMCP 2.0 that 
 - **🏭 Warehouse Analysis**: Top 5 warehouses by cost and credit usage
 - **📊 Credit Usage Tracking**: Detailed credit consumption analysis
 - **💾 Storage Cost Analysis**: Data, stage, and failsafe storage costs
+
+### Databricks Cost Analysis Features
+- **🔐 SSO Authentication**: Personal Access Token with workspace URL integration
+- **💰 Cluster Cost Monitoring**: Estimated costs based on node types and usage
+- **🖥️ Workspace Analysis**: Comprehensive cluster and job cost breakdown
+- **🏆 Top Clusters Ranking**: Identify most expensive clusters by cost
+- **💡 Cost Optimization**: Actionable recommendations for cost reduction
+- **☁️ Multi-Cloud Support**: AWS, Azure, and GCP Databricks deployments
 
 ### Resources & Prompts
 - **Server Status**: Real-time server information
@@ -156,6 +165,13 @@ Try these commands in Claude Desktop:
 - "Which are my top 5 most expensive warehouses?"
 - "Generate a Snowflake cost report"
 
+**Databricks Cost Analysis:**
+- "Connect to Databricks using SSO with workspace URL https://dbc-12345678-abcd.cloud.databricks.com"
+- "Show me Databricks cluster costs for the last 30 days"
+- "Which are my top 5 most expensive Databricks clusters?"
+- "Generate a Databricks workspace cost report"
+- "Analyze my Databricks workspace costs using SSO"
+
 **Other Tools:**
 - "What's the weather in Tokyo?"
 - "Calculate the average of 10, 20, 30, 40, 50"
@@ -193,6 +209,135 @@ Account ID: 123456789012
 Cost: $98.76
 ```
 
+## 🧱 Databricks Cost Analysis
+
+### Available Databricks Tools
+
+#### 1. Connect with SSO
+```
+connect_databricks_sso(workspace_url, personal_access_token=None)
+```
+- **workspace_url**: Databricks workspace URL (e.g., `https://dbc-12345678-abcd.cloud.databricks.com`)
+- **personal_access_token**: Optional PAT token for API access
+- Supports AWS, Azure, and GCP Databricks deployments
+- Provides step-by-step SSO setup guidance
+
+#### 2. Get Overall Costs
+```
+get_databricks_overall_costs(days=30)
+```
+- **days**: Number of days to analyze (default: 30)
+- Returns cluster cost estimation based on node types
+- Includes active vs total cluster counts
+- Provides job and workspace object counts
+
+#### 3. Get Top Clusters
+```
+get_databricks_top_clusters(days=30, limit=5)
+```
+- **days**: Number of days to analyze (default: 30)
+- **limit**: Maximum number of clusters to return (default: 5)
+- Ranks clusters by estimated cost
+- Shows cluster states and configurations
+
+#### 4. Workspace Summary
+```
+get_databricks_workspace_summary(days=30)
+```
+- **days**: Number of days to analyze (default: 30)
+- Comprehensive workspace analysis
+- Cost optimization recommendations
+- Average cost per cluster metrics
+
+#### 5. Cost Report
+```
+get_databricks_cost_report(days=30)
+```
+- **days**: Number of days to analyze (default: 30)
+- Formatted text report with insights
+- Includes cost optimization recommendations
+
+### Databricks Authentication Setup
+
+#### Step-by-Step SSO Setup:
+
+1. **Get Your Workspace URL**:
+   - Find your Databricks workspace URL (e.g., `https://dbc-12345678-abcd.cloud.databricks.com`)
+   - Works with AWS, Azure (`*.azuredatabricks.net`), and GCP deployments
+
+2. **Generate Personal Access Token**:
+   ```
+   1. Go to your Databricks workspace
+   2. Click on your user icon → User Settings  
+   3. Go to 'Access tokens' tab
+   4. Click 'Generate new token'
+   5. Set expiration and click 'Generate'
+   6. Copy the generated token
+   ```
+
+3. **Connect via Agent**:
+   - The agent will guide you through the complete setup process
+   - Provides interactive prompts for workspace URL and token
+   - Validates connection and provides helpful error messages
+
+### Sample Databricks Cost Report
+
+```
+🧱 DATABRICKS COST ANALYSIS REPORT
+==================================================
+Workspace: https://dbc-12345678-abcd.cloud.databricks.com
+Analysis Period: 30 days
+Date Range: 2024-12-01 to 2024-12-31
+
+💰 COST SUMMARY
+--------------------
+Estimated Total Cost: $2,847.50
+Total Clusters: 8
+Active Clusters: 3
+Average Cost per Cluster: $355.94
+
+🖥️ TOP CLUSTERS BY COST
+-------------------------
+1. ml-training-cluster ($945.60)
+   State: RUNNING
+   Workers: 4 x i3.2xlarge
+
+2. analytics-prod ($612.30)
+   State: TERMINATED
+   Workers: 2 x m5.xlarge
+
+3. data-processing ($398.75)
+   State: RUNNING
+   Workers: 3 x r5.large
+
+💡 COST OPTIMIZATION RECOMMENDATIONS
+-------------------------------------
+1. Enable auto-termination for interactive clusters to avoid idle costs
+2. Use job clusters instead of interactive clusters for scheduled workloads
+3. Consider using spot instances for fault-tolerant workloads
+4. Monitor cluster utilization and right-size based on actual usage
+
+📝 Note: Costs are estimated based on AWS instance pricing and assumed 
+8 hours daily usage. Actual costs may vary based on actual usage, 
+Databricks units pricing, and your contract.
+```
+
+### Databricks Cost Optimization Tips
+
+#### 🏆 Best Practices:
+- **Auto-Termination**: Set automatic cluster termination (15-30 minutes idle)
+- **Job Clusters**: Use dedicated job clusters for scheduled workloads
+- **Spot Instances**: Leverage spot instances for fault-tolerant workloads
+- **Right-Sizing**: Monitor utilization and adjust cluster sizes
+- **Pool Management**: Use cluster pools for faster startup times
+- **Delta Lake**: Optimize storage costs with Delta Lake features
+
+#### 💡 Cost Monitoring:
+- **Regular Reviews**: Monitor costs weekly using the cost analysis tools
+- **Cluster Audits**: Review idle and underutilized clusters monthly
+- **Usage Patterns**: Track peak usage times and optimize accordingly
+- **Cost Alerts**: Set up cost thresholds and monitoring
+
 ## 🛠️ Configuration
 
 ### Environment Variables
@@ -216,6 +361,15 @@ Ensure your AWS credentials have the following permissions:
 - `ce:GetCostAndUsage` (Cost Explorer)
 - `sts:GetCallerIdentity` (Account information)
 
+### Databricks Configuration
+For Databricks cost analysis, you'll need:
+- **Workspace URL**: Your Databricks workspace URL
+- **Personal Access Token**: Generated from User Settings → Access tokens
+- **Permissions**: Token should have access to:
+  - Clusters API (`clusters:read`)
+  - Jobs API (`jobs:read`)
+  - Workspace API (`workspace:read`)
+
 ## 📁 Project Structure
 
 ```
@@ -233,6 +387,7 @@ pulse-mcp-server/
 ├── aws_cost_analyzer.py        # AWS cost analysis engine
 ├── stock_market_analyzer.py    # Stock market analysis engine
 ├── snowflake_cost_analyzer.py  # Snowflake cost monitoring engine
+├── databricks_cost_analyzer.py # Databricks cost analysis engine
 ├── run_http_server.py          # Flexible server runner
 ├── claude_config.json          # Claude Desktop configuration
 ├── requirements.txt            # Python dependencies
@@ -255,11 +410,24 @@ pulse-mcp-server/
 
 ### Custom Cost Analysis
 ```python
+# AWS Cost Analysis
 from aws_cost_analyzer import AWSCostAnalyzer
 
 analyzer = AWSCostAnalyzer()
 result = analyzer.analyze_all_profiles(days=7)  # Last 7 days
 print(result)
+
+# Databricks Cost Analysis
+from databricks_cost_analyzer import DatabricksCostAnalyzer
+
+analyzer = DatabricksCostAnalyzer()
+connection = analyzer.connect_with_sso(
+    workspace_url="https://dbc-12345678-abcd.cloud.databricks.com",
+    personal_access_token="your_token_here"
+)
+if connection['success']:
+    result = analyzer.get_workspace_summary(days=30)
+    print(result)
 ```
 
 ### HTTP API Integration
@@ -280,6 +448,7 @@ curl -X POST http://localhost:8000 \
 - **[AWS Cost Explorer API](https://docs.aws.amazon.com/ce/)**: AWS Cost Explorer documentation
 - **[Yahoo Finance API](https://pypi.org/project/yfinance/)**: Stock market data source
 - **[Snowflake Python Connector](https://docs.snowflake.com/en/user-guide/python-connector.html)**: Snowflake integration
+- **[Databricks REST API](https://docs.databricks.com/dev-tools/api/latest/)**: Databricks workspace API integration
 
 ## 🤝 Contributing
 
