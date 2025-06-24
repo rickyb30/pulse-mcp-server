@@ -18,6 +18,9 @@ from stock_market_analyzer import StockMarketAnalyzer, format_stock_report
 # Import Snowflake cost analyzer
 from snowflake_cost_analyzer import SnowflakeCostAnalyzer, format_snowflake_report
 
+# Import Databricks cost analyzer
+from databricks_cost_analyzer import DatabricksCostAnalyzer, format_databricks_report
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -694,6 +697,148 @@ def connect_snowflake_auto() -> Dict[str, Any]:
             'message': 'Failed to auto-connect to Snowflake'
         }
 
+# --- Databricks Tools ---
+
+@mcp.tool
+def connect_databricks_sso(workspace_url: str, personal_access_token: str = None) -> Dict[str, Any]:
+    """Connect to Databricks using SSO/Personal Access Token.
+    
+    Args:
+        workspace_url: Databricks workspace URL (e.g., https://dbc-12345678-abcd.cloud.databricks.com)
+        personal_access_token: Optional Personal Access Token for API access
+        
+    Returns:
+        Connection result with success status and instructions if needed
+    """
+    try:
+        analyzer = DatabricksCostAnalyzer()
+        result = analyzer.connect_with_sso(workspace_url, personal_access_token)
+        
+        # Store analyzer globally if connection successful
+        if result.get('success'):
+            globals()['_databricks_analyzer'] = analyzer
+        
+        return result
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to connect to Databricks'
+        }
+
+@mcp.tool
+def get_databricks_overall_costs(days: Optional[int] = 30) -> Dict[str, Any]:
+    """Get overall Databricks costs for the specified period.
+    
+    Args:
+        days: Number of days to analyze (default: 30)
+        
+    Returns:
+        Cost analysis with cluster information and estimated costs
+    """
+    try:
+        if '_databricks_analyzer' not in globals() or globals()['_databricks_analyzer'] is None:
+            return {
+                'success': False,
+                'error': 'Not connected to Databricks. Please connect first using connect_databricks_sso.',
+                'requires_connection': True
+            }
+        
+        analyzer = globals()['_databricks_analyzer']
+        return analyzer.get_overall_costs(days)
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to retrieve Databricks cost data'
+        }
+
+@mcp.tool
+def get_databricks_top_clusters(days: Optional[int] = 30, limit: Optional[int] = 5) -> Dict[str, Any]:
+    """Get top Databricks clusters by estimated cost.
+    
+    Args:
+        days: Number of days to analyze (default: 30)
+        limit: Maximum number of clusters to return (default: 5)
+        
+    Returns:
+        Top clusters ranked by estimated cost
+    """
+    try:
+        if '_databricks_analyzer' not in globals() or globals()['_databricks_analyzer'] is None:
+            return {
+                'success': False,
+                'error': 'Not connected to Databricks. Please connect first using connect_databricks_sso.',
+                'requires_connection': True
+            }
+        
+        analyzer = globals()['_databricks_analyzer']
+        return analyzer.get_top_clusters_by_cost(days, limit)
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to retrieve Databricks cluster cost data'
+        }
+
+@mcp.tool
+def get_databricks_workspace_summary(days: Optional[int] = 30) -> Dict[str, Any]:
+    """Get comprehensive Databricks workspace summary with cost analysis and recommendations.
+    
+    Args:
+        days: Number of days to analyze (default: 30)
+        
+    Returns:
+        Comprehensive workspace summary with costs, usage, and optimization recommendations
+    """
+    try:
+        if '_databricks_analyzer' not in globals() or globals()['_databricks_analyzer'] is None:
+            return {
+                'success': False,
+                'error': 'Not connected to Databricks. Please connect first using connect_databricks_sso.',
+                'requires_connection': True
+            }
+        
+        analyzer = globals()['_databricks_analyzer']
+        return analyzer.get_workspace_summary(days)
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Failed to generate Databricks workspace summary'
+        }
+
+@mcp.tool
+def get_databricks_cost_report(days: Optional[int] = 30) -> str:
+    """Generate a formatted Databricks cost analysis report.
+    
+    Args:
+        days: Number of days to analyze (default: 30)
+        
+    Returns:
+        Formatted cost analysis report as text
+    """
+    try:
+        if '_databricks_analyzer' not in globals() or globals()['_databricks_analyzer'] is None:
+            return "❌ Error: Not connected to Databricks. Please connect first using connect_databricks_sso."
+        
+        analyzer = globals()['_databricks_analyzer']
+        
+        # Get workspace summary which includes all the data we need
+        summary_result = analyzer.get_workspace_summary(days)
+        
+        if not summary_result.get('success'):
+            return f"❌ Error: {summary_result.get('error', 'Failed to generate report')}"
+        
+        # Also get cluster details for the report
+        cost_result = analyzer.get_overall_costs(days)
+        if cost_result.get('success') and 'cluster_details' in cost_result:
+            summary_result['cluster_details'] = cost_result['cluster_details']
+        
+        return format_databricks_report(summary_result)
+    except Exception as e:
+        return f"❌ Error generating Databricks cost report: {str(e)}"
+
 # --- Resources ---
 
 # Create a config resource
@@ -703,7 +848,7 @@ def config() -> Dict[str, Any]:
     return {
         "app_name": "Pulse",
         "version": "3.0.0",
-        "features": ["tools", "resources", "prompts", "aws_cost_analysis", "stock_market_analysis", "snowflake_cost_analysis"],
+        "features": ["tools", "resources", "prompts", "aws_cost_analysis", "stock_market_analysis", "snowflake_cost_analysis", "databricks_cost_analysis"],
         "max_connections": 100,
         "aws_features": {
             "cost_analysis": True,
@@ -724,6 +869,14 @@ def config() -> Dict[str, Any]:
             "warehouse_cost_analysis": True,
             "storage_cost_tracking": True,
             "credit_usage_analysis": True
+        },
+        "databricks_features": {
+            "sso_authentication": True,
+            "personal_access_token_support": True,
+            "cluster_cost_analysis": True,
+            "workspace_cost_monitoring": True,
+            "job_cost_tracking": True,
+            "cost_optimization_recommendations": True
         }
     }
 
@@ -854,6 +1007,26 @@ def snowflake_cost_analysis_template() -> str:
     6. Warehouse sizing and auto-suspend recommendations
     
     Focus on actionable insights that can help reduce Snowflake costs while maintaining performance.
+    """
+
+@mcp.prompt("databricks_cost_analyst")
+def databricks_cost_analysis_template() -> str:
+    """A template for Databricks cost analysis."""
+    return """
+    You are a Databricks cost optimization expert examining the following cost data:
+    
+    {databricks_data}
+    
+    Please provide:
+    1. Overall cost breakdown analysis (compute clusters vs jobs)
+    2. Cluster utilization and efficiency analysis
+    3. Cost optimization opportunities and recommendations
+    4. Identification of potential cost anomalies or idle resources
+    5. Best practices for Databricks cost management
+    6. Cluster sizing and auto-termination recommendations
+    7. Job cluster vs interactive cluster optimization suggestions
+    
+    Focus on actionable insights that can help reduce Databricks costs while maintaining performance and productivity.
     """
 
 @mcp.prompt("api_documentation")

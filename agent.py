@@ -83,7 +83,12 @@ class MCPAgent:
                     'get_snowflake_top_warehouses': {'description': 'Get top Snowflake warehouses by cost', 'category': 'snowflake'},
                     'get_snowflake_cost_summary': {'description': 'Get Snowflake cost summary', 'category': 'snowflake'},
                     'get_snowflake_cost_report': {'description': 'Generate Snowflake cost report', 'category': 'snowflake'},
-                    'connect_snowflake_auto': {'description': 'Auto-connect to Snowflake', 'category': 'snowflake'}
+                    'connect_snowflake_auto': {'description': 'Auto-connect to Snowflake', 'category': 'snowflake'},
+                    'connect_databricks_sso': {'description': 'Connect to Databricks using SSO', 'category': 'databricks'},
+                    'get_databricks_overall_costs': {'description': 'Get overall Databricks costs', 'category': 'databricks'},
+                    'get_databricks_top_clusters': {'description': 'Get top Databricks clusters by cost', 'category': 'databricks'},
+                    'get_databricks_workspace_summary': {'description': 'Get Databricks workspace summary', 'category': 'databricks'},
+                    'get_databricks_cost_report': {'description': 'Generate Databricks cost report', 'category': 'databricks'}
                 }
                 
         except Exception as e:
@@ -96,6 +101,7 @@ class MCPAgent:
         # Define keywords for different categories
         keywords = {
             'snowflake': ['snowflake', 'warehouse', 'credits', 'compute', 'sf cost'],
+            'databricks': ['databricks', 'cluster', 'workspace', 'spark', 'dbx', 'db cost'],
             'aws': ['aws', 'amazon', 'ec2', 'rds', 's3', 'lambda', 'cloud cost'],
             'stock': ['stock', 'ticker', 'share', 'equity', 'portfolio', 'nasdaq', 'dow', 'sp500'],
             'crypto': ['crypto', 'bitcoin', 'ethereum', 'cryptocurrency', 'btc', 'eth'],
@@ -145,6 +151,19 @@ class MCPAgent:
                 suggested_tools.append('get_snowflake_top_warehouses')
             else:
                 suggested_tools.extend(['get_snowflake_overall_costs', 'get_snowflake_cost_summary'])
+        
+        # Databricks-related tools
+        if 'databricks' in intents:
+            if 'connect' in actions:
+                suggested_tools.append('connect_databricks_sso')
+            elif 'cost_analysis' in actions:
+                suggested_tools.extend(['get_databricks_overall_costs', 'get_databricks_workspace_summary'])
+            elif 'generate_report' in actions:
+                suggested_tools.append('get_databricks_cost_report')
+            elif 'list' in actions:
+                suggested_tools.append('get_databricks_top_clusters')
+            else:
+                suggested_tools.extend(['get_databricks_overall_costs', 'get_databricks_workspace_summary'])
         
         # AWS-related tools
         if 'aws' in intents:
@@ -241,7 +260,7 @@ class MCPAgent:
                     params['symbol'] = match.group(1)
                     break
         
-        elif tool_name.startswith('snowflake') or tool_name.startswith('aws'):
+        elif tool_name.startswith('snowflake') or tool_name.startswith('aws') or tool_name.startswith('databricks'):
             # Extract days for cost analysis
             days_patterns = [
                 r'(\d+)\s*days?',
@@ -576,6 +595,129 @@ class MCPAgent:
         except Exception as e:
             return {'success': False, 'error': f'Credential setup failed: {str(e)}'}
     
+    async def ensure_databricks_connection(self, original_question: str) -> Dict[str, Any]:
+        """Ensure Databricks is connected, ask for details if needed"""
+        try:
+            # Detect user's preferred connection method from their question
+            preferred_method = self.detect_connection_preference(original_question)
+            
+            if preferred_method == 'sso':
+                print("🔐 Detected SSO preference in your question. Setting up Databricks SSO connection...")
+                result = await self.setup_databricks_sso()
+                return result
+            else:
+                # Default to SSO setup for Databricks
+                print("🧱 Databricks connection required.")
+                print("🔗 Databricks uses SSO authentication with Personal Access Tokens")
+                result = await self.setup_databricks_sso()
+                return result
+                
+        except Exception as e:
+            return {'success': False, 'error': f'Databricks connection failed: {str(e)}'}
+    
+    def extract_workspace_url(self, url_input: str) -> str:
+        """Extract and normalize Databricks workspace URL"""
+        # Remove any extra whitespace
+        url_input = url_input.strip()
+        
+        # If it doesn't start with https://, add it
+        if not url_input.startswith('https://'):
+            url_input = f'https://{url_input}'
+        
+        # Common Databricks URL patterns
+        if 'databricks.com' in url_input:
+            return url_input
+        elif 'cloud.databricks.com' in url_input:
+            return url_input
+        elif 'azuredatabricks.net' in url_input:
+            return url_input
+        else:
+            # Assume it's a custom domain or partial URL
+            return url_input
+    
+    async def setup_databricks_sso(self) -> Dict[str, Any]:
+        """Setup Databricks SSO connection"""
+        try:
+            print("\n🧱 Setting up Databricks SSO connection...")
+            print("💡 You'll need:")
+            print("   • Your Databricks workspace URL")
+            print("   • A Personal Access Token")
+            print()
+            
+            # Get workspace URL
+            workspace_url = input("🔗 Enter your Databricks workspace URL: ").strip()
+            if not workspace_url:
+                return {'success': False, 'error': 'Workspace URL is required'}
+            
+            # Normalize the URL
+            workspace_url = self.extract_workspace_url(workspace_url)
+            print(f"📝 Using workspace URL: {workspace_url}")
+            
+            # Get Personal Access Token
+            print("\n🔑 Personal Access Token Setup:")
+            print("   1. Go to your Databricks workspace")
+            print("   2. Click on your user icon → User Settings")
+            print("   3. Go to 'Access tokens' tab")
+            print("   4. Click 'Generate new token'")
+            print("   5. Copy the generated token")
+            print()
+            
+            token = input("🔐 Enter your Personal Access Token (or press Enter to continue without it): ").strip()
+            
+            # Try to connect
+            print("\n🔌 Attempting to connect to Databricks...")
+            
+            # Call the connection tool
+            if token:
+                result = await self.execute_tool('connect_databricks_sso', {
+                    'workspace_url': workspace_url,
+                    'personal_access_token': token
+                })
+            else:
+                result = await self.execute_tool('connect_databricks_sso', {
+                    'workspace_url': workspace_url
+                })
+            
+            if isinstance(result, str):
+                try:
+                    parsed_result = json.loads(result)
+                    if isinstance(parsed_result, dict):
+                        if parsed_result.get('success'):
+                            print("✅ SSO connection successful!")
+                            if parsed_result.get('message'):
+                                print(f"📝 {parsed_result['message']}")
+                        elif parsed_result.get('requires_token'):
+                            print("⚠️  Personal Access Token required for API access")
+                            if parsed_result.get('instructions'):
+                                print("\n📋 Instructions:")
+                                for instruction in parsed_result['instructions']:
+                                    print(f"   {instruction}")
+                        return parsed_result
+                    else:
+                        print(f"❌ Connection result: {result}")
+                        return {'success': False, 'error': result}
+                except json.JSONDecodeError:
+                    print(f"❌ Unexpected result: {result}")
+                    return {'success': False, 'error': str(result)}
+            elif isinstance(result, dict):
+                if result.get('success'):
+                    print("✅ SSO connection successful!")
+                    if result.get('message'):
+                        print(f"📝 {result['message']}")
+                elif result.get('requires_token'):
+                    print("⚠️  Personal Access Token required for API access")
+                    if result.get('instructions'):
+                        print("\n📋 Instructions:")
+                        for instruction in result['instructions']:
+                            print(f"   {instruction}")
+                return result
+            else:
+                print(f"❌ Unexpected result type: {type(result)} - {result}")
+                return {'success': False, 'error': str(result)}
+                
+        except Exception as e:
+            return {'success': False, 'error': f'SSO setup failed: {str(e)}'}
+    
     async def handle_question(self, question: str) -> str:
         """Handle a user question by analyzing it and executing appropriate tools"""
         print(f"\n🤔 Analyzing question: {question}")
@@ -602,11 +744,21 @@ class MCPAgent:
                 if connection_result.get('method') != 'skipped':
                     print("🎯 Connection established! Proceeding with your request...")
         
+        # Check if Databricks connection is needed
+        if 'databricks' in analysis['intents']:
+            connection_result = await self.ensure_databricks_connection(question)
+            if connection_result and 'error' in connection_result:
+                return f"❌ Databricks connection failed: {connection_result['error']}"
+            
+            # If connection was successful, show connection status
+            if connection_result and connection_result.get('success'):
+                print("🎯 Databricks connection established! Proceeding with your request...")
+        
         # Suggest and execute tools
         suggested_tools = self.suggest_tools(analysis)
         
         if not suggested_tools:
-            return "🤷 I'm not sure which tools to use for this question. Could you be more specific? Available categories: AWS, Snowflake, Stocks, Weather, Math, Search"
+            return "🤷 I'm not sure which tools to use for this question. Could you be more specific? Available categories: AWS, Snowflake, Databricks, Stocks, Weather, Math, Search"
         
         print(f"🛠️  Suggested tools: {suggested_tools}")
         
@@ -657,6 +809,8 @@ class MCPAgent:
                     # Format based on tool type
                     if 'snowflake' in tool_name.lower():
                         response_parts.append(self.format_snowflake_result(tool_result))
+                    elif 'databricks' in tool_name.lower():
+                        response_parts.append(self.format_databricks_result(tool_result))
                     elif 'aws' in tool_name.lower():
                         response_parts.append(self.format_aws_result(tool_result))
                     elif 'stock' in tool_name.lower() or 'market' in tool_name.lower():
@@ -678,6 +832,25 @@ class MCPAgent:
             for wh in warehouses:
                 formatted += f"      • {wh.get('name', 'Unknown')}: ${wh.get('cost', 0):.2f}\n"
             return formatted
+        else:
+            return f"   📊 {json.dumps(result, indent=6)}"
+    
+    def format_databricks_result(self, result: Dict[str, Any]) -> str:
+        """Format Databricks-specific results"""
+        if 'cost_summary' in result or 'summary' in result:
+            summary = result.get('cost_summary', result.get('summary', {}))
+            total_cost = summary.get('estimated_total_cost', 0)
+            total_clusters = summary.get('total_clusters', 0)
+            active_clusters = summary.get('active_clusters', 0)
+            return f"   💰 Total estimated cost: ${total_cost:.2f}\n   🖥️  Clusters: {active_clusters}/{total_clusters} active"
+        elif 'top_clusters' in result:
+            clusters = result['top_clusters'][:3]  # Top 3
+            formatted = "   🏆 Top clusters by cost:\n"
+            for cluster in clusters:
+                formatted += f"      • {cluster.get('cluster_name', 'Unnamed')}: ${cluster.get('estimated_period_cost', 0):.2f}\n"
+            return formatted
+        elif 'workspace_url' in result:
+            return f"   🧱 Workspace: {result.get('workspace_url')}\n   📊 {json.dumps(result, indent=6)}"
         else:
             return f"   📊 {json.dumps(result, indent=6)}"
     
@@ -711,6 +884,7 @@ class MCPAgent:
 
 **Available Categories:**
 • 📊 **Snowflake**: Cost analysis, warehouse usage, billing reports
+• 🧱 **Databricks**: Cost analysis, cluster usage, workspace monitoring
 • ☁️  **AWS**: Cost analysis, profile discovery, billing reports  
 • 📈 **Finance**: Stock info, market data, portfolio analysis
 • 🌤️  **Weather**: Current weather for any city
@@ -719,6 +893,7 @@ class MCPAgent:
 
 **Example Questions:**
 • "What's my Snowflake cost for the last 30 days?"
+• "Show me Databricks cluster costs using SSO"
 • "Show me AWS costs for the past week"
 • "What's the weather in New York?"
 • "Get stock info for AAPL"
