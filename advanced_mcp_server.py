@@ -521,6 +521,8 @@ def connect_snowflake_sso(account: str, user: str) -> Dict[str, Any]:
         # Add helpful context for Claude Desktop users
         if result['success']:
             result['claude_desktop_note'] = 'SSO authentication completed. Your browser was used for authentication. You can now run Snowflake cost analysis commands.'
+        elif result.get('authentication_url'):
+            result['claude_desktop_note'] = f"Please click this URL to complete authentication: {result['authentication_url']}"
         
         return result
     except Exception as e:

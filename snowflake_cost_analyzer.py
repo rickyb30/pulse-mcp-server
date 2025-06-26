@@ -12,6 +12,7 @@ from typing import Dict, List, Any, Optional
 import json
 import io
 import contextlib
+import re
 
 class SnowflakeCostAnalyzer:
     """Snowflake Cost Analysis Tool"""
@@ -21,26 +22,52 @@ class SnowflakeCostAnalyzer:
         
     @contextlib.contextmanager
     def _suppress_connector_output(self):
-        """Context manager to suppress Snowflake connector's non-JSON output while preserving functionality"""
+        """Context manager to capture Snowflake connector's output and extract auth URL"""
         # Store original stdout/stderr
         old_stdout = sys.stdout
         old_stderr = sys.stderr
         
+        # Create string buffers to capture output
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        
         try:
             # Redirect stdout/stderr to capture the output
-            sys.stdout = io.StringIO()
-            sys.stderr = io.StringIO()
-            yield
+            sys.stdout = stdout_buffer
+            sys.stderr = stderr_buffer
+            yield stdout_buffer, stderr_buffer
         finally:
             # Restore original stdout/stderr
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+    
+    def _extract_auth_url(self, captured_output: str) -> Optional[str]:
+        """Extract authentication URL from captured Snowflake connector output"""
+        # Look for authentication URL patterns
+        url_patterns = [
+            r'Going to open: (https?://[^\s\n]+)',
+            r'Open the following link: (https?://[^\s\n]+)',
+            r'Please open: (https?://[^\s\n]+)',
+            r'Navigate to: (https?://[^\s\n]+)',
+            r'(https://login\.microsoftonline\.com/[^\s\n]+)',
+            r'(https://[^.]+\.snowflakecomputing\.com/[^\s\n]*)',
+        ]
         
+        for pattern in url_patterns:
+            match = re.search(pattern, captured_output, re.IGNORECASE)
+            if match:
+                return match.group(1).rstrip('.,!?')
+        
+        return None
+    
     def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
         """Connect to Snowflake using SSO/External Browser authentication"""
+        auth_url = None
+        captured_messages = []
+        
         try:
-            # Suppress the connector's non-JSON output during authentication
-            with self._suppress_connector_output():
+            # Capture the connector's output during authentication
+            with self._suppress_connector_output() as (stdout_buffer, stderr_buffer):
                 self.connection = snowflake.connector.connect(
                     account=account,
                     user=user,
@@ -50,7 +77,19 @@ class SnowflakeCostAnalyzer:
                     # warehouse='YOUR_WAREHOUSE'
                 )
             
-            return {
+            # Extract authentication URL and messages from captured output
+            all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
+            auth_url = self._extract_auth_url(all_output)
+            
+            # Extract useful messages (without emojis)
+            lines = all_output.split('\n')
+            for line in lines:
+                clean_line = line.strip()
+                if clean_line and not any(emoji in clean_line for emoji in ['🚀', '🌐', '🔧']):
+                    if 'Going to open:' in clean_line or 'login' in clean_line.lower():
+                        captured_messages.append(clean_line)
+            
+            response = {
                 'success': True,
                 'message': f'Successfully connected to Snowflake account: {account}',
                 'user': user,
@@ -58,8 +97,20 @@ class SnowflakeCostAnalyzer:
                 'authentication_method': 'SSO',
                 'note': 'Browser authentication completed successfully'
             }
+            
+            # Include authentication URL if found
+            if auth_url:
+                response['authentication_url'] = auth_url
+                response['authentication_instructions'] = 'Please click the authentication URL to complete SSO login'
+            
+            # Include captured messages if any
+            if captured_messages:
+                response['authentication_messages'] = captured_messages
+            
+            return response
+            
         except Exception as e:
-            return {
+            error_response = {
                 'success': False,
                 'error': str(e),
                 'message': 'Failed to connect to Snowflake. Check your account identifier and ensure SSO is configured.',
@@ -72,6 +123,13 @@ class SnowflakeCostAnalyzer:
                     ]
                 }
             }
+            
+            # If we captured an auth URL before the error, include it
+            if auth_url:
+                error_response['authentication_url'] = auth_url
+                error_response['authentication_instructions'] = 'Try clicking the authentication URL manually'
+            
+            return error_response
     
     def connect_with_credentials(self, account: str, user: str, password: str, 
                                role: Optional[str] = None, warehouse: Optional[str] = None) -> Dict[str, Any]:
