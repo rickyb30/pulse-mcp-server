@@ -522,7 +522,15 @@ def connect_snowflake_sso(account: str, user: str) -> Dict[str, Any]:
         if result['success']:
             result['claude_desktop_note'] = 'SSO authentication completed. Your browser was used for authentication. You can now run Snowflake cost analysis commands.'
         elif result.get('authentication_url'):
-            result['claude_desktop_note'] = f"Please click this URL to complete authentication: {result['authentication_url']}"
+            result['claude_desktop_note'] = f"🔐 CLICK THIS OAUTH URL TO AUTHENTICATE: {result['authentication_url']}"
+            result['claude_desktop_instructions'] = [
+                "1. Click the OAuth URL above",
+                "2. Complete Microsoft/SSO authentication in your browser",
+                "3. Once authenticated, try connecting to Snowflake again",
+                "4. The connection should then succeed automatically"
+            ]
+        elif result.get('predicted_authentication_url'):
+            result['claude_desktop_note'] = f"🔐 TRY THIS PREDICTED URL: {result['predicted_authentication_url']}"
         
         return result
     except Exception as e:

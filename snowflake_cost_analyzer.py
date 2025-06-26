@@ -13,123 +13,208 @@ import json
 import io
 import contextlib
 import re
+import threading
+import time
+import webbrowser
 
 class SnowflakeCostAnalyzer:
     """Snowflake Cost Analysis Tool"""
     
     def __init__(self):
         self.connection = None
+        self.auth_url = None
+        self.connection_result = None
+        self.connection_error = None
         
-    @contextlib.contextmanager
-    def _suppress_connector_output(self):
-        """Context manager to capture Snowflake connector's output and extract auth URL"""
-        # Store original stdout/stderr
-        old_stdout = sys.stdout
-        old_stderr = sys.stderr
-        
-        # Create string buffers to capture output
-        stdout_buffer = io.StringIO()
-        stderr_buffer = io.StringIO()
-        
+    def _connection_thread(self, account: str, user: str, authenticator: str = 'externalbrowser'):
+        """Run the connection in a separate thread to avoid blocking"""
         try:
-            # Redirect stdout/stderr to capture the output
-            sys.stdout = stdout_buffer
-            sys.stderr = stderr_buffer
-            yield stdout_buffer, stderr_buffer
-        finally:
-            # Restore original stdout/stderr
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
-    
-    def _extract_auth_url(self, captured_output: str) -> Optional[str]:
-        """Extract authentication URL from captured Snowflake connector output"""
-        # Look for authentication URL patterns
-        url_patterns = [
-            r'Going to open: (https?://[^\s\n]+)',
-            r'Open the following link: (https?://[^\s\n]+)',
-            r'Please open: (https?://[^\s\n]+)',
-            r'Navigate to: (https?://[^\s\n]+)',
-            r'(https://login\.microsoftonline\.com/[^\s\n]+)',
-            r'(https://[^.]+\.snowflakecomputing\.com/[^\s\n]*)',
-        ]
-        
-        for pattern in url_patterns:
-            match = re.search(pattern, captured_output, re.IGNORECASE)
-            if match:
-                return match.group(1).rstrip('.,!?')
-        
-        return None
-    
-    def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
-        """Connect to Snowflake using SSO/External Browser authentication"""
-        auth_url = None
-        captured_messages = []
-        
-        try:
-            # Capture the connector's output during authentication
-            with self._suppress_connector_output() as (stdout_buffer, stderr_buffer):
+            # Capture output
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            stdout_buffer = io.StringIO()
+            stderr_buffer = io.StringIO()
+            
+            try:
+                sys.stdout = stdout_buffer
+                sys.stderr = stderr_buffer
+                
                 self.connection = snowflake.connector.connect(
                     account=account,
                     user=user,
-                    authenticator=authenticator,  # 'externalbrowser' for SSO
-                    # Optional: specify role and warehouse
-                    # role='YOUR_ROLE',
-                    # warehouse='YOUR_WAREHOUSE'
+                    authenticator=authenticator,
+                    login_timeout=300,  # 5 minutes timeout
                 )
-            
-            # Extract authentication URL and messages from captured output
-            all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
-            auth_url = self._extract_auth_url(all_output)
-            
-            # Extract useful messages (without emojis)
-            lines = all_output.split('\n')
-            for line in lines:
-                clean_line = line.strip()
-                if clean_line and not any(emoji in clean_line for emoji in ['🚀', '🌐', '🔧']):
-                    if 'Going to open:' in clean_line or 'login' in clean_line.lower():
-                        captured_messages.append(clean_line)
-            
-            response = {
-                'success': True,
-                'message': f'Successfully connected to Snowflake account: {account}',
-                'user': user,
-                'account': account,
-                'authentication_method': 'SSO',
-                'note': 'Browser authentication completed successfully'
-            }
-            
-            # Include authentication URL if found
-            if auth_url:
-                response['authentication_url'] = auth_url
-                response['authentication_instructions'] = 'Please click the authentication URL to complete SSO login'
-            
-            # Include captured messages if any
-            if captured_messages:
-                response['authentication_messages'] = captured_messages
-            
-            return response
-            
+                
+                self.connection_result = {
+                    'success': True,
+                    'message': f'Successfully connected to Snowflake account: {account}',
+                    'user': user,
+                    'account': account,
+                    'authentication_method': 'SSO'
+                }
+                
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                
+                # Try to extract URL from captured output
+                all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
+                if all_output:
+                    self.auth_url = self._extract_auth_url(all_output)
+                
         except Exception as e:
+            self.connection_error = str(e)
+    
+    def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
+        """Connect to Snowflake using SSO/External Browser authentication"""
+        
+        # Try to generate a predictable auth URL based on account info
+        predicted_url = self._generate_auth_url(account, user)
+        
+        # Start connection in background thread
+        connection_thread = threading.Thread(
+            target=self._connection_thread, 
+            args=(account, user, authenticator)
+        )
+        connection_thread.daemon = True
+        connection_thread.start()
+        
+        # Wait a short time to see if we get a URL or connection
+        wait_time = 0
+        max_wait = 10  # Wait up to 10 seconds
+        
+        while wait_time < max_wait:
+            time.sleep(0.5)
+            wait_time += 0.5
+            
+            # Check if connection completed
+            if self.connection_result:
+                return self.connection_result
+            
+            # Check if we got an auth URL
+            if self.auth_url:
+                return {
+                    'success': False,
+                    'waiting_for_authentication': True,
+                    'authentication_url': self.auth_url,
+                    'authentication_instructions': 'Please click the URL above to complete SSO authentication, then try connecting again',
+                    'message': 'SSO authentication URL generated. Please complete authentication in browser.',
+                    'account': account,
+                    'user': user,
+                    'claude_desktop_note': f'Click this URL to authenticate: {self.auth_url}'
+                }
+            
+            # Check if connection failed
+            if self.connection_error:
+                break
+        
+        # If we get here, either connection is taking too long or failed
+        if self.connection_error:
             error_response = {
                 'success': False,
-                'error': str(e),
-                'message': 'Failed to connect to Snowflake. Check your account identifier and ensure SSO is configured.',
-                'troubleshooting': {
-                    'common_issues': [
-                        'Verify your account identifier format (e.g., abc123.us-east-1 or orgname-accountname)',
-                        'Check if SSO is enabled for your account',
-                        'Ensure your browser allows pop-ups for Snowflake authentication',
-                        'Verify network connectivity to Snowflake'
-                    ]
-                }
+                'error': self.connection_error,
+                'message': 'Failed to connect to Snowflake with SSO',
+                'account': account,
+                'user': user
             }
+        else:
+            # Connection is taking too long, provide predicted URL
+            error_response = {
+                'success': False,
+                'waiting_for_authentication': True,
+                'message': 'SSO authentication is in progress. Please use the authentication URL below.',
+                'account': account,
+                'user': user,
+                'connection_status': 'Authentication in progress...'
+            }
+        
+        # Include predicted URL if available
+        if predicted_url:
+            error_response['predicted_authentication_url'] = predicted_url
+            error_response['authentication_instructions'] = 'Try clicking the predicted authentication URL below'
+            error_response['claude_desktop_note'] = f'Try this authentication URL: {predicted_url}'
+        
+        # Include actual URL if we captured one
+        if self.auth_url:
+            error_response['authentication_url'] = self.auth_url
+            error_response['claude_desktop_note'] = f'Click this URL to authenticate: {self.auth_url}'
+        
+        error_response['troubleshooting'] = {
+            'next_steps': [
+                'Click the authentication URL provided above',
+                'Complete the SSO authentication in your browser', 
+                'Try the connection again after authentication',
+                'Ensure pop-ups are enabled for Snowflake domains'
+            ],
+            'common_issues': [
+                'Browser pop-ups might be blocked',
+                'Network connectivity issues',
+                'SSO not configured for this account',
+                'Invalid account identifier format'
+            ]
+        }
+        
+        return error_response
+    
+    def _generate_auth_url(self, account: str, user: str) -> Optional[str]:
+        """Generate a predictable authentication URL based on account info"""
+        try:
+            # For accounts with privatelink, construct the SSO URL
+            if 'privatelink' in account:
+                # Extract the base URL parts
+                parts = account.split('.')
+                if len(parts) >= 3:
+                    account_id = parts[0]  # e.g., sx18286
+                    region = parts[1]      # e.g., canada-central
+                    
+                    # Common SSO URL patterns for Snowflake
+                    possible_urls = [
+                        f"https://{account}.snowflakecomputing.com/fed/login",
+                        f"https://{account}.snowflakecomputing.com/console/login",
+                        f"https://{account_id}.{region}.snowflakecomputing.com/fed/login",
+                    ]
+                    
+                    # Return the first one as a starting point
+                    return possible_urls[0]
+            else:
+                # For regular accounts
+                return f"https://{account}.snowflakecomputing.com/fed/login"
+                
+        except Exception:
+            pass
+        
+        return None
+    
+    def _extract_auth_url(self, captured_output: str) -> Optional[str]:
+        """Extract authentication URL from captured Snowflake connector output"""
+        # Look for authentication URL patterns - order matters, most specific first
+        url_patterns = [
+            # Microsoft login URLs (most common for SSO)
+            r'Going to open: (https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?[^\s\n\r]*)',
+            r'(https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?SAMLRequest=[^\s\n\r]*)',
+            r'Going to open: (https://login\.microsoftonline\.com/[^\s\n\r]+)',
+            r'(https://login\.microsoftonline\.com/[^\s\n\r]+)',
             
-            # If we captured an auth URL before the error, include it
-            if auth_url:
-                error_response['authentication_url'] = auth_url
-                error_response['authentication_instructions'] = 'Try clicking the authentication URL manually'
+            # Generic patterns for other SSO providers
+            r'Going to open: (https?://[^\s\n\r]+)',
+            r'Open the following link: (https?://[^\s\n\r]+)',
+            r'Please open: (https?://[^\s\n\r]+)',
+            r'Navigate to: (https?://[^\s\n\r]+)',
             
-            return error_response
+            # Snowflake direct login URLs
+            r'(https://[^.\s]+\.snowflakecomputing\.com/[^\s\n\r]*)',
+            r'(https://[^.\s]+\.privatelink\.snowflakecomputing\.com/[^\s\n\r]*)',
+        ]
+        
+        for pattern in url_patterns:
+            match = re.search(pattern, captured_output, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            if match:
+                url = match.group(1).rstrip('.,!?\n\r')
+                # Don't split on spaces for URLs - they might have encoded spaces
+                return url
+        
+        return None
     
     def connect_with_credentials(self, account: str, user: str, password: str, 
                                role: Optional[str] = None, warehouse: Optional[str] = None) -> Dict[str, Any]:
