@@ -521,6 +521,16 @@ def connect_snowflake_sso(account: str, user: str) -> Dict[str, Any]:
         # Add helpful context for Claude Desktop users
         if result['success']:
             result['claude_desktop_note'] = 'SSO authentication completed. Your browser was used for authentication. You can now run Snowflake cost analysis commands.'
+        elif result.get('waiting_for_authentication') and result.get('action_taken') == 'browser_opened_automatically':
+            result['claude_desktop_note'] = '🌐 Browser automatically opened for SSO authentication. Please complete authentication in the opened browser window, then try connecting again.'
+            result['claude_desktop_instructions'] = [
+                "1. Check your browser - an authentication window should have opened automatically",
+                "2. Complete the Microsoft/SSO authentication process",
+                "3. Once authenticated, try connecting to Snowflake again",
+                "4. The connection should then succeed"
+            ]
+        elif result.get('fallback_url'):
+            result['claude_desktop_note'] = f"⚠️ Could not open browser automatically. Please manually open: {result['fallback_url']}"
         
         return result
     except Exception as e:

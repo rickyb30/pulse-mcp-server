@@ -12,6 +12,9 @@ from typing import Dict, List, Any, Optional
 import json
 import io
 import contextlib
+import webbrowser
+import re
+import time
 
 class SnowflakeCostAnalyzer:
     """Snowflake Cost Analysis Tool"""
@@ -35,12 +38,47 @@ class SnowflakeCostAnalyzer:
             # Restore original stdout/stderr
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+    
+    def _extract_oauth_url(self, captured_output: str) -> Optional[str]:
+        """Extract OAuth URL from captured Snowflake connector output"""
+        if not captured_output:
+            return None
+            
+        # Look for authentication URL patterns - order matters, most specific first
+        url_patterns = [
+            # Microsoft login URLs (most common for SSO)
+            r'Going to open: (https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?[^\s\n\r]*)',
+            r'(https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?SAMLRequest=[^\s\n\r]*)',
+            r'Going to open: (https://login\.microsoftonline\.com/[^\s\n\r]+)',
+            r'(https://login\.microsoftonline\.com/[^\s\n\r]+)',
+            
+            # Generic patterns for other SSO providers
+            r'Going to open: (https?://[^\s\n\r]+)',
+            r'Open the following link: (https?://[^\s\n\r]+)',
+            r'Please open: (https?://[^\s\n\r]+)',
+            r'Navigate to: (https?://[^\s\n\r]+)',
+            
+            # Snowflake direct login URLs
+            r'(https://[^.\s]+\.snowflakecomputing\.com/[^\s\n\r]*)',
+            r'(https://[^.\s]+\.privatelink\.snowflakecomputing\.com/[^\s\n\r]*)',
+        ]
+        
+        for pattern in url_patterns:
+            match = re.search(pattern, captured_output, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            if match:
+                url = match.group(1).rstrip('.,!?\n\r')
+                return url
+        
+        return None
         
     def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
         """Connect to Snowflake using SSO/External Browser authentication"""
+        stdout_buffer = None
+        stderr_buffer = None
+        
         try:
-            # Suppress the connector's non-JSON output during authentication
-            with self._suppress_connector_output():
+            # Capture the connector's output to extract OAuth URL and auto-open browser
+            with self._suppress_connector_output() as (stdout_buffer, stderr_buffer):
                 self.connection = snowflake.connector.connect(
                     account=account,
                     user=user,
@@ -59,6 +97,36 @@ class SnowflakeCostAnalyzer:
                 'note': 'Browser authentication completed successfully'
             }
         except Exception as e:
+            # Even if connection fails, try to extract and open OAuth URL
+            all_output = ""
+            if stdout_buffer and stderr_buffer:
+                all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
+            
+            oauth_url = self._extract_oauth_url(all_output) if all_output else None
+            
+            if oauth_url:
+                # Automatically open the browser with the OAuth URL
+                try:
+                    webbrowser.open(oauth_url)
+                    return {
+                        'success': False,
+                        'waiting_for_authentication': True,
+                        'message': 'Browser opened for SSO authentication. Please complete authentication and try connecting again.',
+                        'user': user,
+                        'account': account,
+                        'note': 'OAuth URL automatically opened in browser. Complete authentication and retry.',
+                        'action_taken': 'browser_opened_automatically'
+                    }
+                except Exception as browser_error:
+                    return {
+                        'success': False,
+                        'error': str(e),
+                        'browser_error': str(browser_error),
+                        'message': 'Failed to open browser automatically.',
+                        'fallback_url': oauth_url,
+                        'manual_instructions': f'Please manually open this URL: {oauth_url}'
+                    }
+            
             return {
                 'success': False,
                 'error': str(e),
