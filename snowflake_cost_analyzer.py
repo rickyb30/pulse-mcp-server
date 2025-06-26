@@ -60,11 +60,23 @@ class SnowflakeCostAnalyzer:
                 
                 # Try to extract URL from captured output
                 all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
+                print(f"DEBUG: Captured output length: {len(all_output)}")
                 if all_output:
+                    # Print some of the captured output to see what we're getting
+                    print(f"DEBUG: First 200 chars of output: {all_output[:200]}")
                     self.auth_url = self._extract_auth_url(all_output)
                     # Debug: print captured URL to see if it's working
                     if self.auth_url:
-                        print(f"DEBUG: Captured OAuth URL: {self.auth_url[:100]}...")  # Print first 100 chars
+                        print(f"DEBUG: Successfully extracted OAuth URL: {self.auth_url[:100]}...")
+                    else:
+                        print("DEBUG: No URL extracted from output")
+                        # Try to find any URL in the output for debugging
+                        import re
+                        urls = re.findall(r'https?://[^\s\n\r]+', all_output)
+                        if urls:
+                            print(f"DEBUG: Found URLs in output: {[url[:50] + '...' for url in urls]}")
+                        else:
+                            print("DEBUG: No URLs found in output at all")
                 
         except Exception as e:
             self.connection_error = str(e)
@@ -85,11 +97,11 @@ class SnowflakeCostAnalyzer:
         
         # Wait a short time to see if we get a URL or connection
         wait_time = 0
-        max_wait = 10  # Wait up to 10 seconds
+        max_wait = 15  # Wait up to 15 seconds for URL capture
         
         while wait_time < max_wait:
-            time.sleep(0.5)
-            wait_time += 0.5
+            time.sleep(0.2)  # Check more frequently
+            wait_time += 0.2
             
             # Check if connection completed
             if self.connection_result:
@@ -97,15 +109,17 @@ class SnowflakeCostAnalyzer:
             
             # Check if we got an auth URL
             if self.auth_url:
+                print(f"DEBUG: Found auth URL in wait loop: {self.auth_url[:100]}...")
                 return {
                     'success': False,
                     'waiting_for_authentication': True,
                     'authentication_url': self.auth_url,
                     'authentication_instructions': 'Please click the URL above to complete SSO authentication, then try connecting again',
-                    'message': 'SSO authentication URL generated. Please complete authentication in browser.',
+                    'message': 'SSO authentication URL captured from Snowflake connector.',
                     'account': account,
                     'user': user,
-                    'claude_desktop_note': f'Click this URL to authenticate: {self.auth_url}'
+                    'claude_desktop_note': f'🔐 CAPTURED OAUTH URL: {self.auth_url}',
+                    'url_source': 'captured_from_connector'
                 }
             
             # Check if connection failed
@@ -113,6 +127,8 @@ class SnowflakeCostAnalyzer:
                 break
         
         # If we get here, either connection is taking too long or failed
+        print(f"DEBUG: Wait loop finished. auth_url={self.auth_url}, connection_error={self.connection_error}")
+        
         if self.connection_error:
             error_response = {
                 'success': False,
