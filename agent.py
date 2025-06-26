@@ -77,13 +77,7 @@ class MCPAgent:
                     'analyze_portfolio': {'description': 'Analyze a portfolio of holdings', 'category': 'finance'},
                     'get_crypto_data': {'description': 'Get cryptocurrency data', 'category': 'finance'},
                     'get_stock_report': {'description': 'Generate comprehensive stock report', 'category': 'finance'},
-                    'connect_snowflake_sso': {'description': 'Connect to Snowflake using SSO', 'category': 'snowflake'},
-                    'connect_snowflake_credentials': {'description': 'Connect to Snowflake using credentials', 'category': 'snowflake'},
-                    'get_snowflake_overall_costs': {'description': 'Get overall Snowflake costs', 'category': 'snowflake'},
-                    'get_snowflake_top_warehouses': {'description': 'Get top Snowflake warehouses by cost', 'category': 'snowflake'},
-                    'get_snowflake_cost_summary': {'description': 'Get Snowflake cost summary', 'category': 'snowflake'},
-                    'get_snowflake_cost_report': {'description': 'Generate Snowflake cost report', 'category': 'snowflake'},
-                    'connect_snowflake_auto': {'description': 'Auto-connect to Snowflake', 'category': 'snowflake'},
+                    'snowflake_cost_calculator': {'description': 'Comprehensive Snowflake cost calculator for connection and cost analysis', 'category': 'snowflake'},
                     'connect_databricks_sso': {'description': 'Connect to Databricks using SSO', 'category': 'databricks'},
                     'get_databricks_overall_costs': {'description': 'Get overall Databricks costs', 'category': 'databricks'},
                     'get_databricks_top_clusters': {'description': 'Get top Databricks clusters by cost', 'category': 'databricks'},
@@ -141,16 +135,7 @@ class MCPAgent:
         
         # Snowflake-related tools
         if 'snowflake' in intents:
-            if 'connect' in actions:
-                suggested_tools.extend(['connect_snowflake_auto', 'connect_snowflake_sso'])
-            elif 'cost_analysis' in actions:
-                suggested_tools.extend(['get_snowflake_overall_costs', 'get_snowflake_cost_summary'])
-            elif 'generate_report' in actions:
-                suggested_tools.append('get_snowflake_cost_report')
-            elif 'list' in actions:
-                suggested_tools.append('get_snowflake_top_warehouses')
-            else:
-                suggested_tools.extend(['get_snowflake_overall_costs', 'get_snowflake_cost_summary'])
+            suggested_tools.append('snowflake_cost_calculator')
         
         # Databricks-related tools
         if 'databricks' in intents:
@@ -260,7 +245,37 @@ class MCPAgent:
                     params['symbol'] = match.group(1)
                     break
         
-        elif tool_name.startswith('snowflake') or tool_name.startswith('aws') or tool_name.startswith('databricks'):
+        elif tool_name == 'snowflake_cost_calculator':
+            # Extract days for cost analysis
+            days_patterns = [
+                r'(\d+)\s*days?',
+                r'last\s*(\d+)\s*days?',
+                r'past\s*(\d+)\s*days?'
+            ]
+            for pattern in days_patterns:
+                match = re.search(pattern, question_lower)
+                if match:
+                    params['days'] = int(match.group(1))
+                    break
+            
+            if 'days' not in params:
+                params['days'] = 30  # Default to 30 days
+            
+            # Determine action based on question intent
+            if any(word in question_lower for word in ['connect', 'login', 'authenticate']):
+                params['action'] = 'connect_sso'  # Default to SSO for connection
+            elif any(word in question_lower for word in ['overall', 'total', 'overall cost']):
+                params['action'] = 'overall_costs'
+            elif any(word in question_lower for word in ['warehouse', 'top warehouse']):
+                params['action'] = 'top_warehouses'
+            elif any(word in question_lower for word in ['summary', 'summarize']):
+                params['action'] = 'cost_summary'
+            elif any(word in question_lower for word in ['report', 'generate report']):
+                params['action'] = 'cost_report'
+            else:
+                params['action'] = 'cost_summary'  # Default action
+                
+        elif tool_name.startswith('aws') or tool_name.startswith('databricks'):
             # Extract days for cost analysis
             days_patterns = [
                 r'(\d+)\s*days?',
@@ -351,7 +366,7 @@ class MCPAgent:
             
             # First try auto-connect
             print("🔍 Checking Snowflake connection...")
-            auto_result = await self.execute_tool('connect_snowflake_auto', {})
+            auto_result = await self.execute_tool('snowflake_cost_calculator', {'action': 'connect_auto'})
             
             if isinstance(auto_result, dict) and auto_result.get('success'):
                 print("✅ Auto-connected to Snowflake successfully!")
@@ -481,7 +496,8 @@ class MCPAgent:
             print("🌐 Your browser will open for authentication...")
             
             # Execute SSO connection
-            result = await self.execute_tool('connect_snowflake_sso', {
+            result = await self.execute_tool('snowflake_cost_calculator', {
+                'action': 'connect_sso',
                 'account': account,
                 'user': user
             })
@@ -561,7 +577,8 @@ class MCPAgent:
             if warehouse:
                 params['warehouse'] = warehouse
             
-            result = await self.execute_tool('connect_snowflake_credentials', params)
+            params['action'] = 'connect_credentials'
+            result = await self.execute_tool('snowflake_cost_calculator', params)
             
             if isinstance(result, dict):
                 if result.get('success'):

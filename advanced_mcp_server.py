@@ -500,11 +500,11 @@ def get_stock_report(symbol: str) -> str:
 # --- Snowflake Cost Analysis Tools ---
 
 @mcp.tool
-def snowflake_analysis(action: str, account: Optional[str] = None, user: Optional[str] = None, 
-                      password: Optional[str] = None, days: Optional[int] = 30, 
-                      limit: Optional[int] = 5, role: Optional[str] = None, 
-                      warehouse: Optional[str] = None) -> Dict[str, Any]:
-    """Comprehensive Snowflake analysis tool for connection and cost analysis.
+def snowflake_cost_calculator(action: str, account: Optional[str] = None, user: Optional[str] = None, 
+                              password: Optional[str] = None, days: Optional[int] = 30, 
+                              limit: Optional[int] = 5, role: Optional[str] = None, 
+                              warehouse: Optional[str] = None) -> Dict[str, Any]:
+    """Comprehensive Snowflake cost calculator for connection and cost analysis.
     
     Args:
         action: Action to perform - 'connect_sso', 'connect_credentials', 'connect_auto', 
