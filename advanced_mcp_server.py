@@ -500,216 +500,120 @@ def get_stock_report(symbol: str) -> str:
 # --- Snowflake Cost Analysis Tools ---
 
 @mcp.tool
-def connect_snowflake_sso(account: str, user: str) -> Dict[str, Any]:
-    """Connect to Snowflake using SSO/External Browser authentication.
+def snowflake_analysis(action: str, account: Optional[str] = None, user: Optional[str] = None, 
+                      password: Optional[str] = None, days: Optional[int] = 30, 
+                      limit: Optional[int] = 5, role: Optional[str] = None, 
+                      warehouse: Optional[str] = None) -> Dict[str, Any]:
+    """Comprehensive Snowflake analysis tool for connection and cost analysis.
     
     Args:
-        account: Snowflake account identifier (e.g., 'account.region')
-        user: Your Snowflake username
+        action: Action to perform - 'connect_sso', 'connect_credentials', 'connect_auto', 
+                'overall_costs', 'top_warehouses', 'cost_summary', 'cost_report'
+        account: Snowflake account identifier (required for connect actions)
+        user: Snowflake username (required for connect actions)
+        password: Snowflake password (required for connect_credentials)
+        days: Number of days to analyze for cost actions (default: 30)
+        limit: Number of results to return for top_warehouses (default: 5)
+        role: Optional role to assume for connections
+        warehouse: Optional default warehouse for connections
         
     Returns:
-        Connection status and details
+        Results based on the action performed
     """
     try:
-        analyzer = SnowflakeCostAnalyzer()
-        result = analyzer.connect_with_sso(account, user)
-        
-        # Store the analyzer instance for subsequent calls
-        # Note: In a real implementation, you'd want to manage connections more carefully
-        globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
-        
-        # Add helpful context for Claude Desktop users
-        if result['success']:
-            result['claude_desktop_note'] = 'SSO authentication completed. Your browser was used for authentication. You can now run Snowflake cost analysis commands.'
-        elif result.get('waiting_for_authentication') and result.get('action_taken') == 'browser_opened_automatically':
-            result['claude_desktop_note'] = '🌐 Browser automatically opened for SSO authentication. Please complete authentication in the opened browser window, then try connecting again.'
-            result['claude_desktop_instructions'] = [
-                "1. Check your browser - an authentication window should have opened automatically",
-                "2. Complete the Microsoft/SSO authentication process",
-                "3. Once authenticated, try connecting to Snowflake again",
-                "4. The connection should then succeed"
-            ]
-        elif result.get('fallback_url'):
-            result['claude_desktop_note'] = f"⚠️ Could not open browser automatically. Please manually open: {result['fallback_url']}"
-        
-        return result
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e),
-            'message': 'Failed to connect to Snowflake with SSO',
-            'claude_desktop_help': 'If authentication fails, ensure your browser allows pop-ups and you have access to the specified Snowflake account.'
-        }
-
-@mcp.tool
-def connect_snowflake_credentials(account: str, user: str, password: str, 
-                                role: Optional[str] = None, warehouse: Optional[str] = None) -> Dict[str, Any]:
-    """Connect to Snowflake using username/password authentication.
-    
-    Args:
-        account: Snowflake account identifier
-        user: Your Snowflake username
-        password: Your Snowflake password
-        role: Optional role to assume
-        warehouse: Optional default warehouse
-        
-    Returns:
-        Connection status and details
-    """
-    try:
-        analyzer = SnowflakeCostAnalyzer()
-        result = analyzer.connect_with_credentials(account, user, password, role, warehouse)
-        
-        # Store the analyzer instance for subsequent calls
-        globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
-        
-        return result
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e),
-            'message': 'Failed to connect to Snowflake with credentials'
-        }
-
-@mcp.tool
-def get_snowflake_overall_costs(days: Optional[int] = 30) -> Dict[str, Any]:
-    """Get overall Snowflake costs for the specified period.
-    
-    Args:
-        days: Number of days to analyze (default: 30)
-        
-    Returns:
-        Overall cost breakdown including compute and storage costs
-    """
-    try:
-        analyzer = globals().get('_snowflake_analyzer')
-        if not analyzer:
-            return {
-                'success': False,
-                'error': 'Not connected to Snowflake. Please connect first using connect_snowflake_sso or connect_snowflake_credentials.'
-            }
-        
-        return analyzer.get_overall_costs(days)
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-@mcp.tool
-def get_snowflake_top_warehouses(days: Optional[int] = 30, limit: Optional[int] = 5) -> Dict[str, Any]:
-    """Get top warehouses by cost/credit usage.
-    
-    Args:
-        days: Number of days to analyze (default: 30)
-        limit: Number of top warehouses to return (default: 5)
-        
-    Returns:
-        List of top warehouses with cost and usage metrics
-    """
-    try:
-        analyzer = globals().get('_snowflake_analyzer')
-        if not analyzer:
-            return {
-                'success': False,
-                'error': 'Not connected to Snowflake. Please connect first using connect_snowflake_sso or connect_snowflake_credentials.'
-            }
-        
-        return analyzer.get_top_warehouses_by_cost(days, limit)
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-@mcp.tool
-def get_snowflake_cost_summary(days: Optional[int] = 30) -> Dict[str, Any]:
-    """Get comprehensive Snowflake cost summary including overall costs and top warehouses.
-    
-    Args:
-        days: Number of days to analyze (default: 30)
-        
-    Returns:
-        Complete Snowflake cost analysis with overall costs and warehouse breakdown
-    """
-    try:
-        analyzer = globals().get('_snowflake_analyzer')
-        if not analyzer:
-            return {
-                'success': False,
-                'error': 'Not connected to Snowflake. Please connect first using connect_snowflake_sso or connect_snowflake_credentials.'
-            }
-        
-        return analyzer.get_snowflake_summary(days)
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-@mcp.tool
-def get_snowflake_cost_report(days: Optional[int] = 30) -> str:
-    """Get a formatted Snowflake cost analysis report.
-    
-    Args:
-        days: Number of days to analyze (default: 30)
-        
-    Returns:
-        Formatted text report with Snowflake cost analysis
-    """
-    try:
-        analyzer = globals().get('_snowflake_analyzer')
-        if not analyzer:
-            return "❌ Not connected to Snowflake. Please connect first using connect_snowflake_sso or connect_snowflake_credentials."
-        
-        result = analyzer.get_snowflake_summary(days)
-        return format_snowflake_report(result)
-    except Exception as e:
-        return f"❌ Failed to generate Snowflake cost report: {str(e)}"
-
-@mcp.tool
-def connect_snowflake_auto() -> Dict[str, Any]:
-    """Auto-connect to Snowflake using environment variables.
-    
-    Looks for SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, and optionally SNOWFLAKE_PASSWORD
-    or uses SSO if SNOWFLAKE_AUTHENTICATOR=externalbrowser
-    
-    Returns:
-        Connection status and details
-    """
-    try:
-        account = os.getenv("SNOWFLAKE_ACCOUNT")
-        user = os.getenv("SNOWFLAKE_USER")
-        password = os.getenv("SNOWFLAKE_PASSWORD")
-        authenticator = os.getenv("SNOWFLAKE_AUTHENTICATOR", "externalbrowser")
-        role = os.getenv("SNOWFLAKE_ROLE")
-        warehouse = os.getenv("SNOWFLAKE_WAREHOUSE")
-        
-        if not account or not user:
-            return {
-                'success': False,
-                'error': 'Missing required environment variables',
-                'message': 'Please set SNOWFLAKE_ACCOUNT and SNOWFLAKE_USER environment variables, or use connect_snowflake_sso/connect_snowflake_credentials tools'
-            }
-        
-        analyzer = SnowflakeCostAnalyzer()
-        
-        if authenticator == "externalbrowser" or not password:
-            # Use SSO
-            result = analyzer.connect_with_sso(account, user, authenticator)
-        else:
-            # Use credentials
+        if action == 'connect_sso':
+            if not account or not user:
+                return {'success': False, 'error': 'Account and user are required for SSO connection'}
+            
+            analyzer = SnowflakeCostAnalyzer()
+            result = analyzer.connect_with_sso(account, user)
+            
+            # Store the analyzer instance for subsequent calls
+            globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
+            
+            # Add helpful context for Claude Desktop users
+            if result['success']:
+                result['claude_desktop_note'] = 'SSO authentication completed. Your browser was used for authentication.'
+            elif result.get('waiting_for_authentication'):
+                oauth_url = result.get('oauth_url') or result.get('claude_desktop_url')
+                if oauth_url:
+                    result['claude_desktop_note'] = f"🔐 Please open this OAuth URL to authenticate: {oauth_url}"
+                    result['claude_desktop_instructions'] = [
+                        "1. Click the OAuth URL above to open it in your browser",
+                        "2. Complete the SSO authentication process", 
+                        "3. Once authenticated, retry the Snowflake connection",
+                        "4. The connection should then succeed"
+                    ]
+                else:
+                    result['claude_desktop_note'] = '🌐 SSO authentication required. Please check the error details.'
+            
+            return result
+            
+        elif action == 'connect_credentials':
+            if not account or not user or not password:
+                return {'success': False, 'error': 'Account, user, and password are required for credential connection'}
+            
+            analyzer = SnowflakeCostAnalyzer()
             result = analyzer.connect_with_credentials(account, user, password, role, warehouse)
-        
-        # Store the analyzer instance for subsequent calls
-        globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
-        
-        return result
+            globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
+            return result
+            
+        elif action == 'connect_auto':
+            account = os.getenv("SNOWFLAKE_ACCOUNT")
+            user = os.getenv("SNOWFLAKE_USER")
+            password = os.getenv("SNOWFLAKE_PASSWORD")
+            authenticator = os.getenv("SNOWFLAKE_AUTHENTICATOR", "externalbrowser")
+            role = os.getenv("SNOWFLAKE_ROLE")
+            warehouse = os.getenv("SNOWFLAKE_WAREHOUSE")
+            
+            if not account or not user:
+                return {
+                    'success': False,
+                    'error': 'Missing required environment variables',
+                    'message': 'Please set SNOWFLAKE_ACCOUNT and SNOWFLAKE_USER environment variables'
+                }
+            
+            analyzer = SnowflakeCostAnalyzer()
+            
+            if authenticator == "externalbrowser" or not password:
+                result = analyzer.connect_with_sso(account, user, authenticator)
+            else:
+                result = analyzer.connect_with_credentials(account, user, password, role, warehouse)
+            
+            globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
+            return result
+            
+        elif action in ['overall_costs', 'top_warehouses', 'cost_summary', 'cost_report']:
+            analyzer = globals().get('_snowflake_analyzer')
+            if not analyzer:
+                return {
+                    'success': False,
+                    'error': 'Not connected to Snowflake. Please connect first using action="connect_sso" or "connect_credentials"'
+                }
+            
+            if action == 'overall_costs':
+                return analyzer.get_overall_costs(days)
+            elif action == 'top_warehouses':
+                return analyzer.get_top_warehouses_by_cost(days, limit)
+            elif action == 'cost_summary':
+                return analyzer.get_snowflake_summary(days)
+            elif action == 'cost_report':
+                result = analyzer.get_snowflake_summary(days)
+                return {'success': True, 'report': format_snowflake_report(result)}
+                
+        else:
+            return {
+                'success': False,
+                'error': f'Unknown action: {action}',
+                'valid_actions': ['connect_sso', 'connect_credentials', 'connect_auto', 
+                                'overall_costs', 'top_warehouses', 'cost_summary', 'cost_report']
+            }
+            
     except Exception as e:
         return {
             'success': False,
             'error': str(e),
-            'message': 'Failed to auto-connect to Snowflake'
+            'message': f'Failed to perform Snowflake {action}'
         }
 
 # --- Databricks Tools ---

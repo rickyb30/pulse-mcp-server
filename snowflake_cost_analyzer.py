@@ -117,28 +117,42 @@ class SnowflakeCostAnalyzer:
                 oauth_url = self._extract_oauth_url(captured_output)
                 
                 if oauth_url:
-                    # We found the OAuth URL! Auto-open it
+                    # We found the OAuth URL! Try to detect environment and handle accordingly
+                    browser_opened = False
+                    browser_error = None
+                    
+                    # Try to open browser, but don't fail if it doesn't work
                     try:
-                        webbrowser.open(oauth_url)
-                        return {
-                            'success': False,
-                            'waiting_for_authentication': True,
-                            'message': 'Browser automatically opened for SSO authentication. Please complete authentication and try connecting again.',
-                            'user': user,
-                            'account': account,
-                            'oauth_url': oauth_url,
-                            'action_taken': 'browser_opened_automatically',
-                            'instructions': 'Complete authentication in the opened browser window, then retry the connection.'
-                        }
-                    except Exception as browser_error:
-                        return {
-                            'success': False,
-                            'error': str(e),
-                            'browser_error': str(browser_error),
-                            'message': 'Failed to open browser automatically. Please manually open the URL below.',
-                            'oauth_url': oauth_url,
-                            'manual_instructions': f'Please manually open this URL: {oauth_url}'
-                        }
+                        # Only attempt browser opening in compatible environments
+                        import os
+                        # Skip auto-opening in Claude Desktop or similar restricted environments
+                        if not os.getenv('CLAUDE_DESKTOP_MODE') and not os.getenv('MCP_SERVER_MODE'):
+                            webbrowser.open(oauth_url)
+                            browser_opened = True
+                    except Exception as be:
+                        browser_error = str(be)
+                    
+                    # Always return the OAuth URL for manual use, regardless of browser success
+                    result = {
+                        'success': False,
+                        'waiting_for_authentication': True,
+                        'user': user,
+                        'account': account,
+                        'oauth_url': oauth_url,
+                        'claude_desktop_url': oauth_url,  # Special key for Claude Desktop
+                        'instructions': 'Please open the OAuth URL below to complete authentication, then retry the connection.'
+                    }
+                    
+                    if browser_opened:
+                        result['message'] = 'Browser opened for SSO authentication. If browser did not open, use the OAuth URL below.'
+                        result['action_taken'] = 'browser_opened_automatically'
+                    else:
+                        result['message'] = 'Please manually open the OAuth URL below for SSO authentication.'
+                        result['action_taken'] = 'manual_url_required'
+                        if browser_error:
+                            result['browser_error'] = browser_error
+                    
+                    return result
                 else:
                     # No OAuth URL found, return the original error
                     return {
