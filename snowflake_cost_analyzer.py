@@ -73,12 +73,9 @@ class SnowflakeCostAnalyzer:
         
     def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
         """Connect to Snowflake using SSO/External Browser authentication"""
-        stdout_buffer = None
-        stderr_buffer = None
-        
         try:
             # Capture the connector's output to extract OAuth URL and auto-open browser
-            with self._suppress_connector_output() as (stdout_buffer, stderr_buffer):
+            with self._suppress_connector_output():
                 self.connection = snowflake.connector.connect(
                     account=account,
                     user=user,
@@ -86,105 +83,57 @@ class SnowflakeCostAnalyzer:
                     login_timeout=300,  # 5 minutes timeout
                 )
                 
-                self.connection_result = {
-                    'success': True,
-                    'message': f'Successfully connected to Snowflake account: {account}',
-                    'user': user,
-                    'account': account,
-                    'authentication_method': 'SSO'
-                }
-                
-            finally:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
-                
-                # Try to extract URL from captured output
-                all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
-                print(f"DEBUG: Captured output length: {len(all_output)}")
-                if all_output:
-                    # Print some of the captured output to see what we're getting
-                    print(f"DEBUG: First 200 chars of output: {all_output[:200]}")
-                    self.auth_url = self._extract_auth_url(all_output)
-                    # Debug: print captured URL to see if it's working
-                    if self.auth_url:
-                        print(f"DEBUG: Successfully extracted OAuth URL: {self.auth_url[:100]}...")
-                    else:
-                        print("DEBUG: No URL extracted from output")
-                        # Try to find any URL in the output for debugging
-                        import re
-                        urls = re.findall(r'https?://[^\s\n\r]+', all_output)
-                        if urls:
-                            print(f"DEBUG: Found URLs in output: {[url[:50] + '...' for url in urls]}")
-                        else:
-                            print("DEBUG: No URLs found in output at all")
+            # If we get here, connection was successful
+            return {
+                'success': True,
+                'message': f'Successfully connected to Snowflake account: {account}',
+                'user': user,
+                'account': account,
+                'authentication_method': 'SSO'
+            }
                 
         except Exception as e:
-            # Even if connection fails, try to extract and open OAuth URL
-            all_output = ""
-            if stdout_buffer and stderr_buffer:
-                all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
+            # Connection failed, likely due to SSO authentication needed
+            # Try to extract OAuth URL from the error/output and auto-open browser
+            error_str = str(e).lower()
             
-            oauth_url = self._extract_oauth_url(all_output) if all_output else None
-            
-            if oauth_url:
-                # Automatically open the browser with the OAuth URL
-                try:
-                    webbrowser.open(oauth_url)
-                    return {
-                        'success': False,
-                        'waiting_for_authentication': True,
-                        'message': 'Browser opened for SSO authentication. Please complete authentication and try connecting again.',
-                        'user': user,
-                        'account': account,
-                        'note': 'OAuth URL automatically opened in browser. Complete authentication and retry.',
-                        'action_taken': 'browser_opened_automatically'
-                    }
-                except Exception as browser_error:
-                    return {
-                        'success': False,
-                        'error': str(e),
-                        'browser_error': str(browser_error),
-                        'message': 'Failed to open browser automatically.',
-                        'fallback_url': oauth_url,
-                        'manual_instructions': f'Please manually open this URL: {oauth_url}'
-                    }
+            # Check if this is an authentication-related error
+            if any(keyword in error_str for keyword in ['authentication', 'login', 'sso', 'browser', 'oauth']):
+                # Generate a predicted OAuth URL and try to open browser
+                predicted_url = self._generate_auth_url(account, user)
+                
+                if predicted_url:
+                    try:
+                        webbrowser.open(predicted_url)
+                        return {
+                            'success': False,
+                            'waiting_for_authentication': True,
+                            'message': 'Browser opened for SSO authentication. Please complete authentication and try connecting again.',
+                            'user': user,
+                            'account': account,
+                            'note': 'Authentication URL automatically opened in browser. Complete authentication and retry.',
+                            'action_taken': 'browser_opened_automatically',
+                            'predicted_url': predicted_url
+                        }
+                    except Exception as browser_error:
+                        return {
+                            'success': False,
+                            'error': str(e),
+                            'browser_error': str(browser_error),
+                            'message': 'Failed to open browser automatically.',
+                            'fallback_url': predicted_url,
+                            'manual_instructions': f'Please manually open this URL: {predicted_url}'
+                        }
             
             return {
                 'success': False,
+                'error': str(e),
                 'waiting_for_authentication': True,
-                'message': 'SSO authentication is in progress. Please use the authentication URL below.',
+                'message': 'SSO authentication is required. Please complete authentication in your browser.',
                 'account': account,
                 'user': user,
-                'connection_status': 'Authentication in progress...'
+                'connection_status': 'Authentication required'
             }
-        
-        # Include actual URL if we captured one (PRIORITIZE THIS)
-        if self.auth_url:
-            error_response['authentication_url'] = self.auth_url
-            error_response['authentication_instructions'] = 'Click the OAuth URL above to complete SSO authentication'
-            error_response['claude_desktop_note'] = f'🔐 CLICK THIS OAUTH URL: {self.auth_url}'
-        # Include predicted URL only if we don't have the actual one
-        elif predicted_url:
-            error_response['predicted_authentication_url'] = predicted_url
-            error_response['authentication_instructions'] = 'Try clicking the predicted authentication URL below'
-            error_response['claude_desktop_note'] = f'🔐 TRY THIS PREDICTED URL: {predicted_url}'
-        
-        error_response['troubleshooting'] = {
-            'next_steps': [
-                'Click the authentication URL provided above',
-                'Complete the SSO authentication in your browser', 
-                'Try the connection again after authentication',
-                'Ensure pop-ups are enabled for Snowflake domains'
-            ],
-            'common_issues': [
-                'Browser pop-ups might be blocked',
-                'Network connectivity issues',
-                'SSO not configured for this account',
-                'Invalid account identifier format'
-            ]
-        }
-        
-        return error_response
     
     def _generate_auth_url(self, account: str, user: str) -> Optional[str]:
         """Generate a predictable authentication URL based on account info"""
@@ -194,8 +143,8 @@ class SnowflakeCostAnalyzer:
                 # Extract the base URL parts
                 parts = account.split('.')
                 if len(parts) >= 3:
-                    account_id = parts[0]  # e.g., sx18286
-                    region = parts[1]      # e.g., canada-central
+                    account_id = parts[0]  
+                    region = parts[1]      
                     
                     # Common SSO URL patterns for Snowflake
                     possible_urls = [
