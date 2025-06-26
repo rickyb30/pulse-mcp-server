@@ -533,19 +533,24 @@ def snowflake_analysis(action: str, account: Optional[str] = None, user: Optiona
             
             # Add helpful context for Claude Desktop users
             if result['success']:
-                result['claude_desktop_note'] = 'SSO authentication completed. Your browser was used for authentication.'
+                result['claude_desktop_note'] = '✅ SSO authentication completed successfully!'
+            elif result.get('waiting_for_authentication') and result.get('oauth_url'):
+                oauth_url = result.get('oauth_url')
+                # Make the OAuth URL very prominent and clickable for Claude Desktop
+                result['oauth_authentication_required'] = True
+                result['authentication_url'] = oauth_url
+                result['claude_desktop_note'] = f"🔐 AUTHENTICATION REQUIRED"
+                result['oauth_instructions'] = f"Please click this URL to authenticate: {oauth_url}"
+                result['step_by_step_instructions'] = [
+                    f"1. Click this URL: {oauth_url}",
+                    "2. Complete the SSO login process in your browser", 
+                    "3. Once authentication is complete, retry the Snowflake connection",
+                    "4. The connection should then succeed automatically"
+                ]
+                # Also include the URL in the main message
+                result['message'] = f"OAuth URL available. Please click: {oauth_url}"
             elif result.get('waiting_for_authentication'):
-                oauth_url = result.get('oauth_url') or result.get('claude_desktop_url')
-                if oauth_url:
-                    result['claude_desktop_note'] = f"🔐 Please open this OAuth URL to authenticate: {oauth_url}"
-                    result['claude_desktop_instructions'] = [
-                        "1. Click the OAuth URL above to open it in your browser",
-                        "2. Complete the SSO authentication process", 
-                        "3. Once authenticated, retry the Snowflake connection",
-                        "4. The connection should then succeed"
-                    ]
-                else:
-                    result['claude_desktop_note'] = '🌐 SSO authentication required. Please check the error details.'
+                result['claude_desktop_note'] = '🌐 SSO authentication required. Please check the error details for the authentication URL.'
             
             return result
             

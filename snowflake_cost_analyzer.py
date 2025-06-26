@@ -116,53 +116,40 @@ class SnowflakeCostAnalyzer:
                 # Try to extract the real OAuth URL from captured output
                 oauth_url = self._extract_oauth_url(captured_output)
                 
+                # If we didn't find an OAuth URL in captured output, try to generate one
+                if not oauth_url:
+                    oauth_url = self._generate_auth_url(account, user)
+                
                 if oauth_url:
-                    # We found the OAuth URL! Try to detect environment and handle accordingly
-                    browser_opened = False
-                    browser_error = None
-                    
-                    # Try to open browser, but don't fail if it doesn't work
-                    try:
-                        # Only attempt browser opening in compatible environments
-                        import os
-                        # Skip auto-opening in Claude Desktop or similar restricted environments
-                        if not os.getenv('CLAUDE_DESKTOP_MODE') and not os.getenv('MCP_SERVER_MODE'):
-                            webbrowser.open(oauth_url)
-                            browser_opened = True
-                    except Exception as be:
-                        browser_error = str(be)
-                    
-                    # Always return the OAuth URL for manual use, regardless of browser success
-                    result = {
+                    # We have an OAuth URL (either captured or generated)
+                    return {
                         'success': False,
                         'waiting_for_authentication': True,
+                        'message': 'OAuth URL available. Please open the URL below to complete SSO authentication.',
                         'user': user,
                         'account': account,
                         'oauth_url': oauth_url,
-                        'claude_desktop_url': oauth_url,  # Special key for Claude Desktop
-                        'instructions': 'Please open the OAuth URL below to complete authentication, then retry the connection.'
+                        'action_taken': 'oauth_url_available',
+                        'instructions': 'Click the OAuth URL below to authenticate, then retry the connection.',
+                        'debug_info': {
+                            'captured_output_length': len(captured_output),
+                            'oauth_source': 'captured' if self._extract_oauth_url(captured_output) else 'generated'
+                        }
                     }
-                    
-                    if browser_opened:
-                        result['message'] = 'Browser opened for SSO authentication. If browser did not open, use the OAuth URL below.'
-                        result['action_taken'] = 'browser_opened_automatically'
-                    else:
-                        result['message'] = 'Please manually open the OAuth URL below for SSO authentication.'
-                        result['action_taken'] = 'manual_url_required'
-                        if browser_error:
-                            result['browser_error'] = browser_error
-                    
-                    return result
                 else:
-                    # No OAuth URL found, return the original error
+                    # No OAuth URL found or generated, return error with debug info
                     return {
                         'success': False,
                         'error': str(e),
                         'waiting_for_authentication': True,
-                        'message': 'SSO authentication is required. Please check the error details.',
+                        'message': 'SSO authentication is required. Could not generate OAuth URL.',
                         'account': account,
                         'user': user,
-                        'captured_output': captured_output[:500] if captured_output else None  # Include some output for debugging
+                        'debug_info': {
+                            'captured_output_length': len(captured_output),
+                            'captured_output_sample': captured_output[:200] if captured_output else 'No output captured',
+                            'error_details': str(e)
+                        }
                     }
                     
         finally:
@@ -173,26 +160,32 @@ class SnowflakeCostAnalyzer:
     def _generate_auth_url(self, account: str, user: str) -> Optional[str]:
         """Generate a predictable authentication URL based on account info"""
         try:
-            # For accounts with privatelink, construct the SSO URL
+            # Clean up account name
+            account = account.strip().lower()
+            
+            # Common SSO URL patterns for Snowflake
+            base_urls = []
+            
+            # Handle different account formats
             if 'privatelink' in account:
-                # Extract the base URL parts
-                parts = account.split('.')
-                if len(parts) >= 3:
-                    account_id = parts[0]  
-                    region = parts[1]      
-                    
-                    # Common SSO URL patterns for Snowflake
-                    possible_urls = [
-                        f"https://{account}.snowflakecomputing.com/fed/login",
-                        f"https://{account}.snowflakecomputing.com/console/login",
-                        f"https://{account_id}.{region}.snowflakecomputing.com/fed/login",
-                    ]
-                    
-                    # Return the first one as a starting point
-                    return possible_urls[0]
+                # PrivateLink accounts: account.region.privatelink.snowflakecomputing.com
+                base_urls.append(f"https://{account}/fed/login")
+                base_urls.append(f"https://{account}/console/login")
+                base_urls.append(f"https://{account}/#/login")
+            elif '.' in account:
+                # Multi-part account names (account.region format)
+                base_urls.append(f"https://{account}.snowflakecomputing.com/fed/login")
+                base_urls.append(f"https://{account}.snowflakecomputing.com/console/login") 
+                base_urls.append(f"https://{account}.snowflakecomputing.com/#/login")
             else:
-                # For regular accounts
-                return f"https://{account}.snowflakecomputing.com/fed/login"
+                # Simple account names
+                base_urls.append(f"https://{account}.snowflakecomputing.com/fed/login")
+                base_urls.append(f"https://{account}.snowflakecomputing.com/console/login")
+                base_urls.append(f"https://{account}.snowflakecomputing.com/#/login")
+            
+            # Return the first URL (most common pattern)
+            if base_urls:
+                return base_urls[0]
                 
         except Exception:
             pass
