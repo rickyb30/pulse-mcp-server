@@ -10,6 +10,8 @@ import snowflake.connector
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 import json
+import io
+import contextlib
 
 class SnowflakeCostAnalyzer:
     """Snowflake Cost Analysis Tool"""
@@ -17,29 +19,58 @@ class SnowflakeCostAnalyzer:
     def __init__(self):
         self.connection = None
         
+    @contextlib.contextmanager
+    def _suppress_connector_output(self):
+        """Context manager to suppress Snowflake connector's non-JSON output while preserving functionality"""
+        # Store original stdout/stderr
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        
+        try:
+            # Redirect stdout/stderr to capture the output
+            sys.stdout = io.StringIO()
+            sys.stderr = io.StringIO()
+            yield
+        finally:
+            # Restore original stdout/stderr
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+        
     def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
         """Connect to Snowflake using SSO/External Browser authentication"""
         try:
-            self.connection = snowflake.connector.connect(
-                account=account,
-                user=user,
-                authenticator=authenticator,  # 'externalbrowser' for SSO
-                # Optional: specify role and warehouse
-                # role='YOUR_ROLE',
-                # warehouse='YOUR_WAREHOUSE'
-            )
+            # Suppress the connector's non-JSON output during authentication
+            with self._suppress_connector_output():
+                self.connection = snowflake.connector.connect(
+                    account=account,
+                    user=user,
+                    authenticator=authenticator,  # 'externalbrowser' for SSO
+                    # Optional: specify role and warehouse
+                    # role='YOUR_ROLE',
+                    # warehouse='YOUR_WAREHOUSE'
+                )
             
             return {
                 'success': True,
                 'message': f'Successfully connected to Snowflake account: {account}',
                 'user': user,
-                'account': account
+                'account': account,
+                'authentication_method': 'SSO',
+                'note': 'Browser authentication completed successfully'
             }
         except Exception as e:
             return {
                 'success': False,
                 'error': str(e),
-                'message': 'Failed to connect to Snowflake. Check your account identifier and ensure SSO is configured.'
+                'message': 'Failed to connect to Snowflake. Check your account identifier and ensure SSO is configured.',
+                'troubleshooting': {
+                    'common_issues': [
+                        'Verify your account identifier format (e.g., abc123.us-east-1 or orgname-accountname)',
+                        'Check if SSO is enabled for your account',
+                        'Ensure your browser allows pop-ups for Snowflake authentication',
+                        'Verify network connectivity to Snowflake'
+                    ]
+                }
             }
     
     def connect_with_credentials(self, account: str, user: str, password: str, 

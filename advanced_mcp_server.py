@@ -518,12 +518,17 @@ def connect_snowflake_sso(account: str, user: str) -> Dict[str, Any]:
         # Note: In a real implementation, you'd want to manage connections more carefully
         globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
         
+        # Add helpful context for Claude Desktop users
+        if result['success']:
+            result['claude_desktop_note'] = 'SSO authentication completed. Your browser was used for authentication. You can now run Snowflake cost analysis commands.'
+        
         return result
     except Exception as e:
         return {
             'success': False,
             'error': str(e),
-            'message': 'Failed to connect to Snowflake with SSO'
+            'message': 'Failed to connect to Snowflake with SSO',
+            'claude_desktop_help': 'If authentication fails, ensure your browser allows pop-ups and you have access to the specified Snowflake account.'
         }
 
 @mcp.tool
