@@ -82,20 +82,42 @@ class SnowflakeCostAnalyzer:
                 self.connection = snowflake.connector.connect(
                     account=account,
                     user=user,
-                    authenticator=authenticator,  # 'externalbrowser' for SSO
-                    # Optional: specify role and warehouse
-                    # role='YOUR_ROLE',
-                    # warehouse='YOUR_WAREHOUSE'
+                    authenticator=authenticator,
+                    login_timeout=300,  # 5 minutes timeout
                 )
-            
-            return {
-                'success': True,
-                'message': f'Successfully connected to Snowflake account: {account}',
-                'user': user,
-                'account': account,
-                'authentication_method': 'SSO',
-                'note': 'Browser authentication completed successfully'
-            }
+                
+                self.connection_result = {
+                    'success': True,
+                    'message': f'Successfully connected to Snowflake account: {account}',
+                    'user': user,
+                    'account': account,
+                    'authentication_method': 'SSO'
+                }
+                
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+                
+                # Try to extract URL from captured output
+                all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
+                print(f"DEBUG: Captured output length: {len(all_output)}")
+                if all_output:
+                    # Print some of the captured output to see what we're getting
+                    print(f"DEBUG: First 200 chars of output: {all_output[:200]}")
+                    self.auth_url = self._extract_auth_url(all_output)
+                    # Debug: print captured URL to see if it's working
+                    if self.auth_url:
+                        print(f"DEBUG: Successfully extracted OAuth URL: {self.auth_url[:100]}...")
+                    else:
+                        print("DEBUG: No URL extracted from output")
+                        # Try to find any URL in the output for debugging
+                        import re
+                        urls = re.findall(r'https?://[^\s\n\r]+', all_output)
+                        if urls:
+                            print(f"DEBUG: Found URLs in output: {[url[:50] + '...' for url in urls]}")
+                        else:
+                            print("DEBUG: No URLs found in output at all")
+                
         except Exception as e:
             # Even if connection fails, try to extract and open OAuth URL
             all_output = ""
@@ -129,17 +151,99 @@ class SnowflakeCostAnalyzer:
             
             return {
                 'success': False,
-                'error': str(e),
-                'message': 'Failed to connect to Snowflake. Check your account identifier and ensure SSO is configured.',
-                'troubleshooting': {
-                    'common_issues': [
-                        'Verify your account identifier format (e.g., abc123.us-east-1 or orgname-accountname)',
-                        'Check if SSO is enabled for your account',
-                        'Ensure your browser allows pop-ups for Snowflake authentication',
-                        'Verify network connectivity to Snowflake'
-                    ]
-                }
+                'waiting_for_authentication': True,
+                'message': 'SSO authentication is in progress. Please use the authentication URL below.',
+                'account': account,
+                'user': user,
+                'connection_status': 'Authentication in progress...'
             }
+        
+        # Include actual URL if we captured one (PRIORITIZE THIS)
+        if self.auth_url:
+            error_response['authentication_url'] = self.auth_url
+            error_response['authentication_instructions'] = 'Click the OAuth URL above to complete SSO authentication'
+            error_response['claude_desktop_note'] = f'🔐 CLICK THIS OAUTH URL: {self.auth_url}'
+        # Include predicted URL only if we don't have the actual one
+        elif predicted_url:
+            error_response['predicted_authentication_url'] = predicted_url
+            error_response['authentication_instructions'] = 'Try clicking the predicted authentication URL below'
+            error_response['claude_desktop_note'] = f'🔐 TRY THIS PREDICTED URL: {predicted_url}'
+        
+        error_response['troubleshooting'] = {
+            'next_steps': [
+                'Click the authentication URL provided above',
+                'Complete the SSO authentication in your browser', 
+                'Try the connection again after authentication',
+                'Ensure pop-ups are enabled for Snowflake domains'
+            ],
+            'common_issues': [
+                'Browser pop-ups might be blocked',
+                'Network connectivity issues',
+                'SSO not configured for this account',
+                'Invalid account identifier format'
+            ]
+        }
+        
+        return error_response
+    
+    def _generate_auth_url(self, account: str, user: str) -> Optional[str]:
+        """Generate a predictable authentication URL based on account info"""
+        try:
+            # For accounts with privatelink, construct the SSO URL
+            if 'privatelink' in account:
+                # Extract the base URL parts
+                parts = account.split('.')
+                if len(parts) >= 3:
+                    account_id = parts[0]  # e.g., sx18286
+                    region = parts[1]      # e.g., canada-central
+                    
+                    # Common SSO URL patterns for Snowflake
+                    possible_urls = [
+                        f"https://{account}.snowflakecomputing.com/fed/login",
+                        f"https://{account}.snowflakecomputing.com/console/login",
+                        f"https://{account_id}.{region}.snowflakecomputing.com/fed/login",
+                    ]
+                    
+                    # Return the first one as a starting point
+                    return possible_urls[0]
+            else:
+                # For regular accounts
+                return f"https://{account}.snowflakecomputing.com/fed/login"
+                
+        except Exception:
+            pass
+        
+        return None
+    
+    def _extract_auth_url(self, captured_output: str) -> Optional[str]:
+        """Extract authentication URL from captured Snowflake connector output"""
+        # Look for authentication URL patterns - order matters, most specific first
+        url_patterns = [
+            # Microsoft login URLs (most common for SSO)
+            r'Going to open: (https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?[^\s\n\r]*)',
+            r'(https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?SAMLRequest=[^\s\n\r]*)',
+            r'Going to open: (https://login\.microsoftonline\.com/[^\s\n\r]+)',
+            r'(https://login\.microsoftonline\.com/[^\s\n\r]+)',
+            
+            # Generic patterns for other SSO providers
+            r'Going to open: (https?://[^\s\n\r]+)',
+            r'Open the following link: (https?://[^\s\n\r]+)',
+            r'Please open: (https?://[^\s\n\r]+)',
+            r'Navigate to: (https?://[^\s\n\r]+)',
+            
+            # Snowflake direct login URLs
+            r'(https://[^.\s]+\.snowflakecomputing\.com/[^\s\n\r]*)',
+            r'(https://[^.\s]+\.privatelink\.snowflakecomputing\.com/[^\s\n\r]*)',
+        ]
+        
+        for pattern in url_patterns:
+            match = re.search(pattern, captured_output, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            if match:
+                url = match.group(1).rstrip('.,!?\n\r')
+                # Don't split on spaces for URLs - they might have encoded spaces
+                return url
+        
+        return None
     
     def connect_with_credentials(self, account: str, user: str, password: str, 
                                role: Optional[str] = None, warehouse: Optional[str] = None) -> Dict[str, Any]:
