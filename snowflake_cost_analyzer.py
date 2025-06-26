@@ -46,21 +46,28 @@ class SnowflakeCostAnalyzer:
             
         # Look for authentication URL patterns - order matters, most specific first
         url_patterns = [
-            # Microsoft login URLs (most common for SSO)
-            r'Going to open: (https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?[^\s\n\r]*)',
-            r'(https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?SAMLRequest=[^\s\n\r]*)',
-            r'Going to open: (https://login\.microsoftonline\.com/[^\s\n\r]+)',
-            r'(https://login\.microsoftonline\.com/[^\s\n\r]+)',
+            # Snowflake's exact output patterns
+            r'Going to open: (https://[^\s\n\r]+)',
+            r'Open the following link: (https://[^\s\n\r]+)',
+            r'Please open: (https://[^\s\n\r]+)',
+            r'Navigate to: (https://[^\s\n\r]+)',
+            r'Browser should open: (https://[^\s\n\r]+)',
             
-            # Generic patterns for other SSO providers
-            r'Going to open: (https?://[^\s\n\r]+)',
-            r'Open the following link: (https?://[^\s\n\r]+)',
-            r'Please open: (https?://[^\s\n\r]+)',
-            r'Navigate to: (https?://[^\s\n\r]+)',
+            # SSO URLs with SAML parameters (common patterns)
+            r'(https://[^/\s]+/[a-f0-9\-]+/saml2\?SAMLRequest=[^\s\n\r]*)',
+            r'(https://[^/\s]+/oauth2/[^\s\n\r]*)',
+            r'(https://[^/\s]+/auth/[^\s\n\r]*)',
+            r'(https://[^/\s]+/login/[^\s\n\r]*)',
             
-            # Snowflake direct login URLs
+            # Any HTTPS URL with authentication parameters
+            r'(https://[^\s\n\r]*(?:SAMLRequest|oauth|auth|login|sso)[^\s\n\r]*)',
+            
+            # Snowflake direct URLs
             r'(https://[^.\s]+\.snowflakecomputing\.com/[^\s\n\r]*)',
             r'(https://[^.\s]+\.privatelink\.snowflakecomputing\.com/[^\s\n\r]*)',
+            
+            # Fallback: any HTTPS URL in the output
+            r'(https://[^\s\n\r]+)',
         ]
         
         for pattern in url_patterns:
@@ -73,9 +80,19 @@ class SnowflakeCostAnalyzer:
         
     def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
         """Connect to Snowflake using SSO/External Browser authentication"""
+        # Store original stdout/stderr
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        captured_output = ""
+        
         try:
-            # Capture the connector's output to extract OAuth URL and auto-open browser
-            with self._suppress_connector_output():
+            # Redirect stdout/stderr to capture the OAuth URL
+            stdout_buffer = io.StringIO()
+            stderr_buffer = io.StringIO()
+            sys.stdout = stdout_buffer
+            sys.stderr = stderr_buffer
+            
+            try:
                 self.connection = snowflake.connector.connect(
                     account=account,
                     user=user,
@@ -83,57 +100,61 @@ class SnowflakeCostAnalyzer:
                     login_timeout=300,  # 5 minutes timeout
                 )
                 
-            # If we get here, connection was successful
-            return {
-                'success': True,
-                'message': f'Successfully connected to Snowflake account: {account}',
-                'user': user,
-                'account': account,
-                'authentication_method': 'SSO'
-            }
+                # If we get here, connection was successful
+                return {
+                    'success': True,
+                    'message': f'Successfully connected to Snowflake account: {account}',
+                    'user': user,
+                    'account': account,
+                    'authentication_method': 'SSO'
+                }
                 
-        except Exception as e:
-            # Connection failed, likely due to SSO authentication needed
-            # Try to extract OAuth URL from the error/output and auto-open browser
-            error_str = str(e).lower()
-            
-            # Check if this is an authentication-related error
-            if any(keyword in error_str for keyword in ['authentication', 'login', 'sso', 'browser', 'oauth']):
-                # Generate a predicted OAuth URL and try to open browser
-                predicted_url = self._generate_auth_url(account, user)
+            except Exception as e:
+                # Capture all output for OAuth URL extraction
+                captured_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
                 
-                if predicted_url:
+                # Try to extract the real OAuth URL from captured output
+                oauth_url = self._extract_oauth_url(captured_output)
+                
+                if oauth_url:
+                    # We found the OAuth URL! Auto-open it
                     try:
-                        webbrowser.open(predicted_url)
+                        webbrowser.open(oauth_url)
                         return {
                             'success': False,
                             'waiting_for_authentication': True,
-                            'message': 'Browser opened for SSO authentication. Please complete authentication and try connecting again.',
+                            'message': 'Browser automatically opened for SSO authentication. Please complete authentication and try connecting again.',
                             'user': user,
                             'account': account,
-                            'note': 'Authentication URL automatically opened in browser. Complete authentication and retry.',
+                            'oauth_url': oauth_url,
                             'action_taken': 'browser_opened_automatically',
-                            'predicted_url': predicted_url
+                            'instructions': 'Complete authentication in the opened browser window, then retry the connection.'
                         }
                     except Exception as browser_error:
                         return {
                             'success': False,
                             'error': str(e),
                             'browser_error': str(browser_error),
-                            'message': 'Failed to open browser automatically.',
-                            'fallback_url': predicted_url,
-                            'manual_instructions': f'Please manually open this URL: {predicted_url}'
+                            'message': 'Failed to open browser automatically. Please manually open the URL below.',
+                            'oauth_url': oauth_url,
+                            'manual_instructions': f'Please manually open this URL: {oauth_url}'
                         }
-            
-            return {
-                'success': False,
-                'error': str(e),
-                'waiting_for_authentication': True,
-                'message': 'SSO authentication is required. Please complete authentication in your browser.',
-                'account': account,
-                'user': user,
-                'connection_status': 'Authentication required'
-            }
+                else:
+                    # No OAuth URL found, return the original error
+                    return {
+                        'success': False,
+                        'error': str(e),
+                        'waiting_for_authentication': True,
+                        'message': 'SSO authentication is required. Please check the error details.',
+                        'account': account,
+                        'user': user,
+                        'captured_output': captured_output[:500] if captured_output else None  # Include some output for debugging
+                    }
+                    
+        finally:
+            # Always restore original stdout/stderr
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
     
     def _generate_auth_url(self, account: str, user: str) -> Optional[str]:
         """Generate a predictable authentication URL based on account info"""
@@ -164,35 +185,7 @@ class SnowflakeCostAnalyzer:
         
         return None
     
-    def _extract_auth_url(self, captured_output: str) -> Optional[str]:
-        """Extract authentication URL from captured Snowflake connector output"""
-        # Look for authentication URL patterns - order matters, most specific first
-        url_patterns = [
-            # Microsoft login URLs (most common for SSO)
-            r'Going to open: (https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?[^\s\n\r]*)',
-            r'(https://login\.microsoftonline\.com/[a-f0-9\-]+/saml2\?SAMLRequest=[^\s\n\r]*)',
-            r'Going to open: (https://login\.microsoftonline\.com/[^\s\n\r]+)',
-            r'(https://login\.microsoftonline\.com/[^\s\n\r]+)',
-            
-            # Generic patterns for other SSO providers
-            r'Going to open: (https?://[^\s\n\r]+)',
-            r'Open the following link: (https?://[^\s\n\r]+)',
-            r'Please open: (https?://[^\s\n\r]+)',
-            r'Navigate to: (https?://[^\s\n\r]+)',
-            
-            # Snowflake direct login URLs
-            r'(https://[^.\s]+\.snowflakecomputing\.com/[^\s\n\r]*)',
-            r'(https://[^.\s]+\.privatelink\.snowflakecomputing\.com/[^\s\n\r]*)',
-        ]
-        
-        for pattern in url_patterns:
-            match = re.search(pattern, captured_output, re.IGNORECASE | re.MULTILINE | re.DOTALL)
-            if match:
-                url = match.group(1).rstrip('.,!?\n\r')
-                # Don't split on spaces for URLs - they might have encoded spaces
-                return url
-        
-        return None
+
     
     def connect_with_credentials(self, account: str, user: str, password: str, 
                                role: Optional[str] = None, warehouse: Optional[str] = None) -> Dict[str, Any]:

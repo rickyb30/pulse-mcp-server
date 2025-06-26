@@ -411,8 +411,8 @@ class MCPAgent:
         if account_input.startswith('https://') or account_input.startswith('http://'):
             # Extract hostname from URL
             # Examples:
-            # https://abc123.us-east-1.privatelink.snowflakecomputing.com/
-            # https://abc123.snowflakecomputing.com/
+            # https://account.region.privatelink.snowflakecomputing.com/
+            # https://account.snowflakecomputing.com/
             # https://myorg-myaccount.snowflakecomputing.com/
             import re
             url_pattern = r'https?://([^/]+)'
@@ -429,8 +429,8 @@ class MCPAgent:
         
         # If it's already an account identifier, return as-is
         # Handle cases like:
-        # abc123.us-east-1
-        # abc123.us-east-1.privatelink
+        # account.region
+        # account.region.privatelink
         # myorg-myaccount
         return account_input
     
@@ -463,8 +463,8 @@ class MCPAgent:
             
             # Get account details - accept full URL or account identifier
             print("💡 You can provide either:")
-            print("   • Full Snowflake URL (e.g., https://abc123.us-east-1.privatelink.snowflakecomputing.com/)")
-            print("   • Account identifier (e.g., abc123.us-east-1 or myorg-myaccount)")
+            print("   • Full Snowflake URL (e.g., https://account.region.snowflakecomputing.com/)")
+            print("   • Account identifier (e.g., account.region or myorg-myaccount)")
             
             account_input = input("\n🏢 Snowflake URL or Account: ").strip()
             if not account_input:
@@ -525,8 +525,8 @@ class MCPAgent:
             
             # Get account details - accept full URL or account identifier
             print("💡 You can provide either:")
-            print("   • Full Snowflake URL (e.g., https://abc123.us-east-1.privatelink.snowflakecomputing.com/)")
-            print("   • Account identifier (e.g., abc123.us-east-1 or myorg-myaccount)")
+            print("   • Full Snowflake URL (e.g., https://account.region.snowflakecomputing.com/)")
+            print("   • Account identifier (e.g., account.region or myorg-myaccount)")
             
             account_input = input("\n🏢 Snowflake URL or Account: ").strip()
             if not account_input:

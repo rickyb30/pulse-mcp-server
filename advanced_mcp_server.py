@@ -504,7 +504,7 @@ def connect_snowflake_sso(account: str, user: str) -> Dict[str, Any]:
     """Connect to Snowflake using SSO/External Browser authentication.
     
     Args:
-        account: Snowflake account identifier (e.g., 'xy12345.us-east-1')
+        account: Snowflake account identifier (e.g., 'account.region')
         user: Your Snowflake username
         
     Returns:

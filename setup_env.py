@@ -64,7 +64,7 @@ def setup_environment():
     choice = input("Enter choice (1-3): ").strip()
     
     if choice == "1":
-        sf_account = input("Enter Snowflake account identifier (e.g., xyz123.us-east-1): ").strip()
+        sf_account = input("Enter Snowflake account identifier (e.g., account.region): ").strip()
         sf_user = input("Enter Snowflake username: ").strip()
         
         if sf_account and sf_user:
