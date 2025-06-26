@@ -62,6 +62,9 @@ class SnowflakeCostAnalyzer:
                 all_output = stdout_buffer.getvalue() + stderr_buffer.getvalue()
                 if all_output:
                     self.auth_url = self._extract_auth_url(all_output)
+                    # Debug: print captured URL to see if it's working
+                    if self.auth_url:
+                        print(f"DEBUG: Captured OAuth URL: {self.auth_url[:100]}...")  # Print first 100 chars
                 
         except Exception as e:
             self.connection_error = str(e)
@@ -129,16 +132,16 @@ class SnowflakeCostAnalyzer:
                 'connection_status': 'Authentication in progress...'
             }
         
-        # Include predicted URL if available
-        if predicted_url:
-            error_response['predicted_authentication_url'] = predicted_url
-            error_response['authentication_instructions'] = 'Try clicking the predicted authentication URL below'
-            error_response['claude_desktop_note'] = f'Try this authentication URL: {predicted_url}'
-        
-        # Include actual URL if we captured one
+        # Include actual URL if we captured one (PRIORITIZE THIS)
         if self.auth_url:
             error_response['authentication_url'] = self.auth_url
-            error_response['claude_desktop_note'] = f'Click this URL to authenticate: {self.auth_url}'
+            error_response['authentication_instructions'] = 'Click the OAuth URL above to complete SSO authentication'
+            error_response['claude_desktop_note'] = f'🔐 CLICK THIS OAUTH URL: {self.auth_url}'
+        # Include predicted URL only if we don't have the actual one
+        elif predicted_url:
+            error_response['predicted_authentication_url'] = predicted_url
+            error_response['authentication_instructions'] = 'Try clicking the predicted authentication URL below'
+            error_response['claude_desktop_note'] = f'🔐 TRY THIS PREDICTED URL: {predicted_url}'
         
         error_response['troubleshooting'] = {
             'next_steps': [
