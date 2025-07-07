@@ -1,11 +1,11 @@
 {
   "mcpServers": {
     "pulse": {
-      "command": "/Users/balkaran/_work/cursor_ai/mcp_llm/venv/bin/python",
-      "args": ["-u", "/Users/balkaran/_work/cursor_ai/mcp_llm/run_http_server.py"],
+      "command": "~/pulse_mcp_server/venv/bin/python",
+      "args": ["-u", "~/pulse_mcp_server/run_http_server.py"],
       "env": {
-        "PATH": "/Users/balkaran/_work/cursor_ai/mcp_llm/venv/bin:/usr/local/bin:/usr/bin:/bin",
-        "PYTHONPATH": "/Users/balkaran/_work/cursor_ai/mcp_llm",
+        "PATH": "~/pulse_mcp_server/venv/bin:/usr/local/bin:/usr/bin:/bin",
+        "PYTHONPATH": "~/pulse_mcp_server",
         "PYTHONUNBUFFERED": "1"
       }
     }
