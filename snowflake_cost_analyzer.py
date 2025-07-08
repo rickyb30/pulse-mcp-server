@@ -22,37 +22,113 @@ class SnowflakeCostAnalyzer:
         try:
             print(f"🔗 Connecting to Snowflake account: {account}")
             print(f"👤 User: {user}")
+            print("🌐 Generating OAuth URL...")
             
-            # For now, let's try to construct the OAuth URL manually
-            # This is a simplified approach - the actual OAuth flow is more complex
-            if '.' in account and not account.endswith('.snowflakecomputing.com'):
-                # Account appears to be in format like abc123.us-east-1
-                base_url = f"https://{account}.snowflakecomputing.com"
-            else:
-                # Account might already include the full domain or be a simple identifier
-                if account.endswith('.snowflakecomputing.com'):
-                    base_url = f"https://{account}"
+            # We need to capture the OAuth URL that Snowflake generates
+            # The connector normally tries to open browser automatically
+            # Let's use a custom approach to get the URL without opening browser
+            import snowflake.connector
+            import logging
+            import sys
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
+            
+            # Capture all output to find the OAuth URL
+            captured_output = io.StringIO()
+            captured_error = io.StringIO()
+            
+            # Set up logging to capture debug info
+            logging.basicConfig(level=logging.DEBUG)
+            logger = logging.getLogger('snowflake.connector')
+            
+            # Temporarily disable browser opening by monkey-patching webbrowser
+            import webbrowser
+            original_open = webbrowser.open
+            oauth_url = None
+            
+            def capture_url(url, new=0, autoraise=True):
+                nonlocal oauth_url
+                oauth_url = url
+                print(f"🔗 OAuth URL captured: {url}")
+                return False  # Don't actually open browser
+            
+            # Replace webbrowser.open with our capture function
+            webbrowser.open = capture_url
+            
+            try:
+                with redirect_stdout(captured_output), redirect_stderr(captured_error):
+                    self.connection = snowflake.connector.connect(
+                        account=account,
+                        user=user,
+                        authenticator=authenticator,
+                        # Disable browser opening
+                        browser_timeout=1  # Short timeout to avoid hanging
+                    )
+            except Exception as e:
+                # Even if connection fails, we might have captured the OAuth URL
+                if oauth_url:
+                    print(f"\n🔗 Please click this OAuth URL to authenticate:")
+                    print(f"   {oauth_url}")
+                    print("\n⏳ After authenticating, please try the connection again...")
+                    
+                    return {
+                        'success': False,
+                        'error': str(e),
+                        'oauth_url': oauth_url,
+                        'message': 'OAuth URL captured. Please authenticate and retry.'
+                    }
                 else:
-                    base_url = f"https://{account}.snowflakecomputing.com"
+                    # Look for URL in captured output
+                    output_text = captured_output.getvalue() + captured_error.getvalue()
+                    import re
+                    url_patterns = [
+                        # Snowflake native URLs
+                        r'https://[^.\s]+\.snowflakecomputing\.com/oauth/[^\s]+',
+                        r'https://[^.\s]+\.snowflakecomputing\.com/session/authenticator-request[^\s]*',
+                        # Microsoft Azure AD URLs (common for enterprise SSO)
+                        r'https://login\.microsoftonline\.com/[^\s]+',
+                        r'https://[^.\s]+\.microsoftonline\.com/[^\s]+',
+                        # Other common identity providers
+                        r'https://[^.\s]+\.okta\.com/[^\s]+',
+                        r'https://accounts\.google\.com/[^\s]+',
+                        # Generic OAuth URLs
+                        r'https://[^\s]+/oauth/[^\s]+',
+                        r'https://[^\s]+/auth/[^\s]+'
+                    ]
+                    
+                    for pattern in url_patterns:
+                        matches = re.findall(pattern, output_text)
+                        if matches:
+                            oauth_url = matches[0]
+                            # Determine the identity provider for clearer messaging
+                            if 'microsoftonline.com' in oauth_url:
+                                provider = "Microsoft Azure AD"
+                            elif 'snowflakecomputing.com' in oauth_url:
+                                provider = "Snowflake"
+                            elif 'okta.com' in oauth_url:
+                                provider = "Okta"
+                            elif 'google.com' in oauth_url:
+                                provider = "Google"
+                            else:
+                                provider = "your organization's identity provider"
+                            
+                            print(f"\n🔗 Please click this {provider} authentication URL:")
+                            print(f"   {oauth_url}")
+                            print(f"\n⏳ After authenticating with {provider}, please try the connection again...")
+                            break
+                    
+                    return {
+                        'success': False,
+                        'error': str(e),
+                        'oauth_url': oauth_url,
+                        'message': 'Please authenticate using the OAuth URL above and retry.'
+                    }
+            finally:
+                # Restore original webbrowser function
+                webbrowser.open = original_open
             
-            # Display manual authentication instructions
-            print("🌐 SSO Authentication Required:")
-            print(f"   1. Open your browser and go to: {base_url}")
-            print(f"   2. Log in with your SSO credentials")
-            print(f"   3. Once logged in, press Enter here to continue...")
-            
-            # Wait for user confirmation
-            input("⏳ Press Enter after completing SSO authentication...")
-            
-            # Now attempt the connection
-            self.connection = snowflake.connector.connect(
-                account=account,
-                user=user,
-                authenticator=authenticator,  # 'externalbrowser' for SSO
-                # Optional: specify role and warehouse
-                # role='YOUR_ROLE',
-                # warehouse='YOUR_WAREHOUSE'
-            )
+            if oauth_url:
+                print(f"✅ Authentication successful!")
             
             return {
                 'success': True,
@@ -60,6 +136,7 @@ class SnowflakeCostAnalyzer:
                 'user': user,
                 'account': account
             }
+            
         except Exception as e:
             return {
                 'success': False,
