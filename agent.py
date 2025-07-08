@@ -652,7 +652,8 @@ class MCPAgent:
             response_parts.append(f"\n🔧 **{tool_name}**:")
             
             if isinstance(tool_result, dict):
-                if 'error' in tool_result:
+                # Check success field first - only show error if operation actually failed
+                if 'error' in tool_result and not tool_result.get('success', False):
                     response_parts.append(f"   ❌ Error: {tool_result['error']}")
                 else:
                     # Format based on tool type
