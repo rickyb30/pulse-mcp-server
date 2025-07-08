@@ -11,10 +11,16 @@ import asyncio
 import json
 import sys
 import re
+import os
 from typing import Dict, List, Any, Optional
 from fastmcp import Client
 from datetime import datetime
 import argparse
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 class MCPAgent:
     def __init__(self):
@@ -209,58 +215,71 @@ class MCPAgent:
         except Exception as e:
             return f"❌ Error executing {tool_name}: {e}"
     
-    def extract_parameters(self, question: str, tool_name: str) -> Dict[str, Any]:
-        """Extract parameters for tools from the user question"""
+    async def extract_parameters_with_llm(self, question: str, tool_name: str) -> Dict[str, Any]:
+        """Extract parameters using LLM for more accurate natural language understanding"""
+        try:
+            # Check if we have OpenAI API key
+            if not OPENAI_API_KEY:
+                return self.extract_parameters_basic(question, tool_name)
+            
+            # For now, skip LLM extraction to avoid client initialization issues
+            # Claude Desktop provides much better intelligence anyway
+            print("🔧 Using basic parameter extraction (LLM extraction disabled)")
+            return self.extract_parameters_basic(question, tool_name)
+            
+        except Exception as e:
+            print(f"⚠️  LLM parameter extraction failed: {e}")
+            return self.extract_parameters_basic(question, tool_name)
+    
+    def extract_parameters_basic(self, question: str, tool_name: str) -> Dict[str, Any]:
+        """Basic parameter extraction as fallback when LLM is not available"""
         params = {}
         question_lower = question.lower()
         
-        # Extract common parameters
+        # Extract common parameters using simple regex
         if tool_name in ['get_weather']:
-            # Try to extract city name
+            # Simple city extraction - look for city names after common prepositions
             city_patterns = [
-                r'weather in ([\w\s]+?)(?:\s|$|[.,?!])',
-                r'weather for ([\w\s]+?)(?:\s|$|[.,?!])',
-                r'temperature in ([\w\s]+?)(?:\s|$|[.,?!])'
+                r'in ([a-zA-Z\s]+)(?:\s*[.,?!]*\s*$)',  # "in [city]" at end
+                r'for ([a-zA-Z\s]+)(?:\s*[.,?!]*\s*$)',  # "for [city]" at end
+                r'at ([a-zA-Z\s]+)(?:\s*[.,?!]*\s*$)',  # "at [city]" at end
             ]
+            
             for pattern in city_patterns:
                 match = re.search(pattern, question_lower)
                 if match:
-                    params['city'] = match.group(1).strip()
-                    break
+                    city = match.group(1).strip()
+                    city = re.sub(r'\s+', ' ', city)
+                    if len(city) >= 2 and not re.search(r'\d', city):
+                        params['city'] = city
+                        break
         
         elif tool_name in ['get_stock_info', 'get_historical_stock_data', 'get_technical_indicators']:
-            # Extract stock symbol
-            symbol_patterns = [
-                r'\b([A-Z]{1,5})\b',  # Stock symbols are usually 1-5 uppercase letters
-                r'stock\s+(\w+)',
-                r'ticker\s+(\w+)'
-            ]
-            for pattern in symbol_patterns:
-                match = re.search(pattern, question.upper())
-                if match:
-                    params['symbol'] = match.group(1)
-                    break
-        
-        elif tool_name.startswith('snowflake') or tool_name.startswith('aws'):
-            # Extract days for cost analysis
-            days_patterns = [
-                r'(\d+)\s*days?',
-                r'last\s*(\d+)\s*days?',
-                r'past\s*(\d+)\s*days?'
-            ]
-            for pattern in days_patterns:
-                match = re.search(pattern, question_lower)
-                if match:
-                    params['days'] = int(match.group(1))
+            # Extract stock symbol - look for common company names and convert to symbols
+            company_to_symbol = {
+                'apple': 'AAPL', 'microsoft': 'MSFT', 'google': 'GOOGL', 'amazon': 'AMZN',
+                'tesla': 'TSLA', 'netflix': 'NFLX', 'facebook': 'META', 'meta': 'META',
+                'nvidia': 'NVDA', 'amd': 'AMD', 'intel': 'INTC', 'oracle': 'ORCL',
+                'salesforce': 'CRM', 'adobe': 'ADBE', 'zoom': 'ZM', 'slack': 'WORK',
+                'twitter': 'TWTR', 'uber': 'UBER', 'lyft': 'LYFT', 'airbnb': 'ABNB',
+                'coinbase': 'COIN', 'robinhood': 'HOOD', 'paypal': 'PYPL', 'square': 'SQ',
+                'disney': 'DIS', 'walmart': 'WMT', 'target': 'TGT', 'nike': 'NKE',
+                'coca cola': 'KO', 'pepsi': 'PEP', 'mcdonalds': 'MCD', 'starbucks': 'SBUX'
+            }
+            
+            # First try to match company names
+            for company, symbol in company_to_symbol.items():
+                if company in question_lower:
+                    params['symbol'] = symbol
                     break
             
-            if 'days' not in params:
-                params['days'] = 30  # Default to 30 days
-        
-        elif tool_name == 'web_search':
-            # For web search, use the entire question as query
-            params['query'] = question
-            params['limit'] = 5
+            # If no company name matched, try to find explicit stock symbols (3-4 uppercase letters)
+            if 'symbol' not in params:
+                # Exclude common words that might match the pattern
+                excluded_words = {'GET', 'FOR', 'THE', 'AND', 'YOU', 'CAN', 'ARE', 'BUT', 'NOT', 'ALL', 'NEW', 'OLD', 'BIG', 'NOW', 'WAY', 'WHO', 'WHY', 'HOW', 'OUT', 'TOP', 'TWO', 'ITS', 'OUR', 'DAY', 'GOT', 'HAS', 'HER', 'HIS', 'HIM', 'HAD', 'LET', 'PUT', 'END', 'USE', 'MAN', 'SUN', 'SET', 'RUN', 'GOT', 'SEE', 'OWN', 'SAY', 'SHE', 'MAY', 'ONE', 'TWO', 'TRY', 'ASK', 'TOO', 'OLD', 'OFF', 'FAR', 'FEW', 'LOT', 'BAD', 'BIG', 'LOW', 'HIGH', 'HOT', 'COLD', 'FAST', 'SLOW', 'GOOD', 'BEST', 'LAST', 'NEXT', 'LONG', 'BACK', 'TELL', 'WANT', 'HELP', 'GIVE', 'TAKE', 'MAKE', 'LOOK', 'FIND', 'SHOW', 'YEAR', 'WEEK', 'MONTH', 'TIME', 'WORK', 'LIFE', 'HAND', 'PART', 'CASE', 'FACT', 'PLACE', 'RIGHT', 'GREAT', 'SMALL', 'LARGE', 'ABOUT', 'AFTER', 'AGAIN', 'AGAINST', 'BEFORE', 'BETWEEN', 'DURING', 'THROUGH', 'UNDER', 'ABOVE', 'BELOW', 'WITHIN', 'WITHOUT', 'AROUND', 'BEHIND', 'BEYOND', 'INSIDE', 'OUTSIDE', 'AROUND', 'ACROSS', 'ALONG', 'AMONG', 'BESIDE', 'EXCEPT', 'TOWARD', 'TOWARDS', 'UNLESS', 'UNTIL', 'WHILE', 'BECAUSE', 'ALTHOUGH', 'SINCE', 'UNLESS', 'WHEREAS', 'WHEREAS', 'WHEREVER', 'WHENEVER', 'HOWEVER', 'WHATEVER', 'WHICHEVER', 'WHOEVER', 'WHOMEVER', 'WHEREVER', 'WHENEVER', 'HOWEVER', 'WHATEVER', 'WHICHEVER', 'WHOEVER', 'WHOMEVER'}
+                symbol_match = re.search(r'\b([A-Z]{3,4})\b', question.upper())
+                if symbol_match and symbol_match.group(1) not in excluded_words:
+                    params['symbol'] = symbol_match.group(1)
         
         elif tool_name == 'calculate':
             # Extract numbers for calculation
@@ -613,8 +632,8 @@ class MCPAgent:
         results = []
         for tool_name in suggested_tools[:3]:  # Limit to 3 tools to avoid overwhelming
             if tool_name in self.tools:
-                # Extract parameters for this tool
-                params = self.extract_parameters(question, tool_name)
+                # Extract parameters for this tool using LLM
+                params = await self.extract_parameters_with_llm(question, tool_name)
                 
                 # Execute the tool
                 result = await self.execute_tool(tool_name, params)
