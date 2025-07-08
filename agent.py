@@ -191,7 +191,32 @@ class MCPAgent:
             print(f"🔧 Executing tool: {tool_name} with params: {params}")
             result = await self.client.call_tool(tool_name, params)
             
-            # Handle TextContent wrapped results from MCP server
+            # Handle fastmcp CallToolResult objects
+            if hasattr(result, 'content') and hasattr(result.content, '__iter__'):
+                # FastMCP CallToolResult with content list
+                for item in result.content:
+                    if hasattr(item, 'text'):
+                        try:
+                            # Try to parse the text as JSON
+                            parsed = json.loads(item.text)
+                            return parsed
+                        except json.JSONDecodeError:
+                            # If not JSON, return the text directly
+                            return item.text
+                return result.content
+            
+            # Handle direct content attribute
+            if hasattr(result, 'content') and not hasattr(result.content, '__iter__'):
+                try:
+                    # Try to parse as JSON first
+                    if isinstance(result.content, str):
+                        parsed = json.loads(result.content)
+                        return parsed
+                    return result.content
+                except (json.JSONDecodeError, AttributeError):
+                    return result.content
+            
+            # Handle TextContent wrapped results from MCP server (legacy)
             if hasattr(result, '__iter__') and not isinstance(result, (str, dict)):
                 # If result is a list/iterable of TextContent objects
                 for item in result:
@@ -204,7 +229,20 @@ class MCPAgent:
                             # If not JSON, return the text directly
                             return item.text
             
-            return result
+            # If result is already a dict or primitive, return as-is
+            if isinstance(result, (dict, str, int, float, bool, list)):
+                return result
+            
+            # Last resort - try to extract any text-like attribute
+            if hasattr(result, 'text'):
+                try:
+                    parsed = json.loads(result.text)
+                    return parsed
+                except json.JSONDecodeError:
+                    return result.text
+            
+            # If all else fails, return string representation
+            return str(result)
             
         except Exception as e:
             return f"❌ Error executing {tool_name}: {e}"
