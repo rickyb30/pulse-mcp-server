@@ -594,8 +594,9 @@ class MCPAgent:
         # Check if Snowflake connection is needed
         if 'snowflake' in analysis['intents']:
             connection_result = await self.ensure_snowflake_connection(question)
-            if connection_result and 'error' in connection_result:
-                return f"❌ Snowflake connection failed: {connection_result['error']}"
+            if connection_result and not connection_result.get('success', False):
+                error_msg = connection_result.get('error', 'Unknown error')
+                return f"❌ Snowflake connection failed: {error_msg}"
             
             # If connection was successful, show connection status
             if connection_result and connection_result.get('success'):
