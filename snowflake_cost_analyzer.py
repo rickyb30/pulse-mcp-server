@@ -20,6 +20,31 @@ class SnowflakeCostAnalyzer:
     def connect_with_sso(self, account: str, user: str, authenticator: str = 'externalbrowser') -> Dict[str, Any]:
         """Connect to Snowflake using SSO/External Browser authentication"""
         try:
+            print(f"🔗 Connecting to Snowflake account: {account}")
+            print(f"👤 User: {user}")
+            
+            # For now, let's try to construct the OAuth URL manually
+            # This is a simplified approach - the actual OAuth flow is more complex
+            if '.' in account and not account.endswith('.snowflakecomputing.com'):
+                # Account appears to be in format like abc123.us-east-1
+                base_url = f"https://{account}.snowflakecomputing.com"
+            else:
+                # Account might already include the full domain or be a simple identifier
+                if account.endswith('.snowflakecomputing.com'):
+                    base_url = f"https://{account}"
+                else:
+                    base_url = f"https://{account}.snowflakecomputing.com"
+            
+            # Display manual authentication instructions
+            print("🌐 SSO Authentication Required:")
+            print(f"   1. Open your browser and go to: {base_url}")
+            print(f"   2. Log in with your SSO credentials")
+            print(f"   3. Once logged in, press Enter here to continue...")
+            
+            # Wait for user confirmation
+            input("⏳ Press Enter after completing SSO authentication...")
+            
+            # Now attempt the connection
             self.connection = snowflake.connector.connect(
                 account=account,
                 user=user,

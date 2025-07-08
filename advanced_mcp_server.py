@@ -501,15 +501,40 @@ def connect_snowflake_sso(account: str, user: str) -> Dict[str, Any]:
     """Connect to Snowflake using SSO/External Browser authentication.
     
     Args:
-        account: Snowflake account identifier (e.g., 'xy12345.us-east-1')
+        account: Snowflake account identifier (e.g., 'xy12345.us-east-1') or full URL
         user: Your Snowflake username
         
     Returns:
         Connection status and details
     """
     try:
+        # Parse account if it's a URL
+        def parse_snowflake_account(account_input: str) -> str:
+            """Parse account identifier from various input formats including full URLs"""
+            account_input = account_input.strip()
+            
+            # If it's a full URL, parse it
+            if account_input.startswith('https://') or account_input.startswith('http://'):
+                import re
+                url_pattern = r'https?://([^/]+)'
+                match = re.match(url_pattern, account_input)
+                if match:
+                    hostname = match.group(1)
+                    # Remove .snowflakecomputing.com suffix if present
+                    if hostname.endswith('.snowflakecomputing.com'):
+                        account = hostname.replace('.snowflakecomputing.com', '')
+                    else:
+                        account = hostname
+                    return account
+            
+            # If it's already an account identifier, return as-is
+            return account_input
+        
+        # Parse the account parameter
+        parsed_account = parse_snowflake_account(account)
+        
         analyzer = SnowflakeCostAnalyzer()
-        result = analyzer.connect_with_sso(account, user)
+        result = analyzer.connect_with_sso(parsed_account, user)
         
         # Store the analyzer instance for subsequent calls
         # Note: In a real implementation, you'd want to manage connections more carefully
@@ -529,7 +554,7 @@ def connect_snowflake_credentials(account: str, user: str, password: str,
     """Connect to Snowflake using username/password authentication.
     
     Args:
-        account: Snowflake account identifier
+        account: Snowflake account identifier or full URL
         user: Your Snowflake username
         password: Your Snowflake password
         role: Optional role to assume
@@ -539,8 +564,33 @@ def connect_snowflake_credentials(account: str, user: str, password: str,
         Connection status and details
     """
     try:
+        # Parse account if it's a URL
+        def parse_snowflake_account(account_input: str) -> str:
+            """Parse account identifier from various input formats including full URLs"""
+            account_input = account_input.strip()
+            
+            # If it's a full URL, parse it
+            if account_input.startswith('https://') or account_input.startswith('http://'):
+                import re
+                url_pattern = r'https?://([^/]+)'
+                match = re.match(url_pattern, account_input)
+                if match:
+                    hostname = match.group(1)
+                    # Remove .snowflakecomputing.com suffix if present
+                    if hostname.endswith('.snowflakecomputing.com'):
+                        account = hostname.replace('.snowflakecomputing.com', '')
+                    else:
+                        account = hostname
+                    return account
+            
+            # If it's already an account identifier, return as-is
+            return account_input
+        
+        # Parse the account parameter
+        parsed_account = parse_snowflake_account(account)
+        
         analyzer = SnowflakeCostAnalyzer()
-        result = analyzer.connect_with_credentials(account, user, password, role, warehouse)
+        result = analyzer.connect_with_credentials(parsed_account, user, password, role, warehouse)
         
         # Store the analyzer instance for subsequent calls
         globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
@@ -674,14 +724,39 @@ def connect_snowflake_auto() -> Dict[str, Any]:
                 'message': 'Please set SNOWFLAKE_ACCOUNT and SNOWFLAKE_USER environment variables, or use connect_snowflake_sso/connect_snowflake_credentials tools'
             }
         
+        # Parse account if it's a URL
+        def parse_snowflake_account(account_input: str) -> str:
+            """Parse account identifier from various input formats including full URLs"""
+            account_input = account_input.strip()
+            
+            # If it's a full URL, parse it
+            if account_input.startswith('https://') or account_input.startswith('http://'):
+                import re
+                url_pattern = r'https?://([^/]+)'
+                match = re.match(url_pattern, account_input)
+                if match:
+                    hostname = match.group(1)
+                    # Remove .snowflakecomputing.com suffix if present
+                    if hostname.endswith('.snowflakecomputing.com'):
+                        account = hostname.replace('.snowflakecomputing.com', '')
+                    else:
+                        account = hostname
+                    return account
+            
+            # If it's already an account identifier, return as-is
+            return account_input
+        
+        # Parse the account parameter
+        parsed_account = parse_snowflake_account(account)
+        
         analyzer = SnowflakeCostAnalyzer()
         
         if authenticator == "externalbrowser" or not password:
             # Use SSO
-            result = analyzer.connect_with_sso(account, user, authenticator)
+            result = analyzer.connect_with_sso(parsed_account, user, authenticator)
         else:
             # Use credentials
-            result = analyzer.connect_with_credentials(account, user, password, role, warehouse)
+            result = analyzer.connect_with_credentials(parsed_account, user, password, role, warehouse)
         
         # Store the analyzer instance for subsequent calls
         globals()['_snowflake_analyzer'] = analyzer if result['success'] else None
